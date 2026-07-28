@@ -1,0 +1,196 @@
+name: icml-paper-search-mcp
+
+x-app-environment: &app-environment
+  HOME: /tmp
+  ICML_PAPERS_DATA_DIR: /app/data
+  ICML_PAPERS_INDEX_ROOT: /var/lib/icml-paper-search/index
+  ICML_PAPERS_STATE_DB_PATH: /var/lib/icml-paper-search/state/runtime.sqlite3
+  ICML_PAPERS_DASHSCOPE_API_KEY_FILE: /run/icml-runtime-secrets/dashscope_api_key
+  ICML_PAPERS_SERVER_HOST: 0.0.0.0
+  ICML_PAPERS_SERVER_PORT: "20441"
+  ICML_PAPERS_ALLOWED_HOSTS: '["icml.agent4sci.com:20441"]'
+  ICML_PAPERS_ALLOWED_ORIGINS: '["https://icml.agent4sci.com:20441"]'
+  ICML_PAPERS_TRUSTED_PROXY_ENABLED: "true"
+  ICML_PAPERS_TRUSTED_PROXY_NETWORKS: '${ICML_PAPERS_TRUSTED_PROXY_NETWORKS:-["172.16.0.0/12"]}'
+
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-app-security: &app-security
+  # 入口仅以 root 复制 0400 secret，随后在 exec app 前降权为 uid 10001。
+  user: "0:0"
+  read_only: true
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - SETGID
+    - SETUID
+  pids_limit: 256
+  ulimits:
+    nofile:
+      soft: 4096
+      hard: 4096
+
+x-app-mounts: &app-mounts
+  - type: bind
+    source: ${ICML_PAPERS_INDEX_DIR:-/var/lib/icml-paper-search-mcp/index}
+    target: /var/lib/icml-paper-search/index
+    bind:
+      create_host_path: false
+  - type: bind
+    source: ${ICML_PAPERS_STATE_DIR:-/var/lib/icml-paper-search-mcp/state}
+    target: /var/lib/icml-paper-search/state
+    bind:
+      create_host_path: false
+
+services:
+  icml-mcp:
+    image: ${ICML_MCP_IMAGE:?Set ICML_MCP_IMAGE to an immutable git-SHA tag}
+    container_name: icml-mcp
+    environment: *app-environment
+    secrets:
+      - source: dashscope_api_key
+        target: dashscope_api_key
+    volumes:
+      - type: bind
+        source: ${ICML_PAPERS_INDEX_DIR:-/var/lib/icml-paper-search-mcp/index}
+        target: /var/lib/icml-paper-search/index
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ICML_PAPERS_STATE_DIR:-/var/lib/icml-paper-search-mcp/state}
+        target: /var/lib/icml-paper-search/state
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+      - /run/icml-runtime-secrets:rw,noexec,nosuid,nodev,size=1m,mode=0700
+    networks:
+      - backend
+      - provider-egress
+    expose:
+      - "20441"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cpus: 1.75
+    mem_limit: 2g
+    <<: *app-security
+    logging: *bounded-logging
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; request = urllib.request.Request('http://127.0.0.1:20441/health/ready', headers={'Host': 'icml.agent4sci.com:20441'}); urllib.request.urlopen(request, timeout=4).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  build-index:
+    image: ${ICML_MCP_IMAGE:?Set ICML_MCP_IMAGE to an immutable git-SHA tag}
+    profiles:
+      - build
+    environment: *app-environment
+    command:
+      - icml-papers
+      - build
+      - --execute
+      - --max-input-tokens
+      - ${ICML_PAPERS_BUILD_MAX_INPUT_TOKENS:?Set a hard build token cap}
+    secrets:
+      - source: dashscope_api_key
+        target: dashscope_api_key
+    volumes: *app-mounts
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+      - /run/icml-runtime-secrets:rw,noexec,nosuid,nodev,size=1m,mode=0700
+    networks:
+      - provider-egress
+    restart: "no"
+    cpus: 2.0
+    mem_limit: 3g
+    <<: *app-security
+    logging: *bounded-logging
+    healthcheck:
+      disable: true
+
+  icml-mcp-tls:
+    image: nginx:1.29-alpine
+    container_name: icml-mcp-tls
+    entrypoint:
+      - nginx
+      - -g
+      - daemon off;
+    depends_on:
+      icml-mcp:
+        condition: service_healthy
+    ports:
+      - "${ICML_PAPERS_PUBLIC_PORT:-20441}:20441/tcp"
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ICML_PAPERS_CERT_LIVE_DIR:-/etc/letsencrypt/live/icml.agent4sci.com}
+        target: /etc/letsencrypt/live/icml.agent4sci.com
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ICML_PAPERS_CERT_ARCHIVE_DIR:-/etc/letsencrypt/archive/icml.agent4sci.com}
+        target: /etc/letsencrypt/archive/icml.agent4sci.com
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    networks:
+      - backend
+    restart: unless-stopped
+    stop_grace_period: 10s
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 64
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging: *bounded-logging
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --no-check-certificate
+        - "--header=Host: icml.agent4sci.com:20441"
+        - --output-document=/dev/null
+        - https://127.0.0.1:20441/health/live
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+secrets:
+  dashscope_api_key:
+    file: ${ICML_PAPERS_DASHSCOPE_SECRET_FILE:?Set the host DashScope secret file}
+
+networks:
+  backend: {}
+  provider-egress: {}
