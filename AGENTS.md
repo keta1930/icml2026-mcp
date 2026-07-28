@@ -70,6 +70,8 @@ src/icml_paper_search/
 - 付费建库必须同时要求显式 execute 和正数 Token cap；每批调用前按 UTF-8 byte 数加单输入固定开销保守预留，必要时按剩余额度缩小批次。写入 staging，按完整批次前移 checkpoint，完整验证后再原子发布版本并切换 `current`。
 - provider actual usage 超过建库预留时，必须在索引写入和 checkpoint 前 fail closed，持久化不含原文的故障审计，并禁止对该 staging 自动 resume。
 - resume 只接受 build id、语料哈希、模型、维度和 batch size 匹配的 checkpoint，且 completed ids 必须是当前语料的严格前缀。失败构建不得替换已有 `current`。
+- 容器服务必须只读挂载 canonical index；入口在 state 固定锁下校验 `current` 路径边界，将对应的完整 manifest/Chroma/BM25 版本单元复制到唯一 generation，执行零云完整校验并复核 `current` 后，通过 backup rename 可回滚地发布为可写 `runtime-index`。应用与 readiness 只打开该副本。
+- `runtime-index` 是每次启动重建的可再生数据；冷备处理 canonical index 与 runtime SQLite 状态，并排除该副本。`build-index` job 继续直接读写 canonical index，不走运行副本。
 
 ### 并发、资源与 transport
 
@@ -78,7 +80,7 @@ src/icml_paper_search/
 - 所有同步 provider、Chroma 和 SQLite 工作都必须从 async MCP handler offload，不能阻塞 event loop。慢搜索与轻量状态操作使用分离 limiter。
 - admission 的 active + waiting 总数不得超过 `search_queue_size`；容量预留必须在首个 await 前完成，超额立即返回 `server_busy`。已 admission 的请求再等待有界 worker，超时、取消和异常路径都必须释放名额。
 - Chroma 本地持久化目录由单个应用进程打开。不得让多个 worker、应用容器或并行 build/serve writer 共享同一目录。
-- 服务容器只读挂载已发布 index，runtime state 单独读写；建库 job 才能写 index。备份和恢复必须在应用停止时同时处理 index 与 state。
+- 服务容器的 canonical index 挂载保持只读，runtime state 单独读写；建库 job 才能写 canonical index。备份和恢复必须在应用停止时处理 canonical index 与非派生 state。
 - Docker builder 与 runtime 的虚拟环境绝对路径必须一致，两个 console script 必须通过真实镜像 smoke。Compose 网络由 Docker 动态分配，禁止恢复固定 subnet；`trusted_proxy_networks` 只表示信任边界，不得用于网络分配。
 - 默认使用 HTTP peer 作为限流身份。只有 peer 位于显式可信网段时才接受固定代理 header；公网部署必须设置精确 Host/Origin 并保持 DNS rebinding 防护。
 - `live` 只检查进程；`ready` 只检查本地 state/index，不读取 key 或访问 provider。未知异常和 provider 响应只能映射为脱敏公开错误码。

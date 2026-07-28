@@ -249,21 +249,21 @@ sh deploy/smoke-container.sh icml-paper-search-mcp:local
 - `build-index` 的 `ICML_PAPERS_BUILD_MAX_INPUT_TOKENS`
 - 与实际域名匹配的证书、Host/Origin 白名单和可信代理网段
 
-先以 `build` profile 显式建库，再启动 `icml-mcp` 与 TLS sidecar。服务容器以只读方式挂载 index，只有独立建库 job 可以写入它。Compose 让 Docker 动态分配 `backend` 与 `provider-egress` bridge subnet，不预占固定网段；`ICML_PAPERS_TRUSTED_PROXY_NETWORKS` 只控制应用信任哪些代理来源，并不分配 Docker 网络。部署前应把它收敛到实际 TLS sidecar 所在的 backend 网段。
+先以 `build` profile 显式建库，再启动 `icml-mcp` 与 TLS sidecar。建库 job 直接读写权威 index；服务容器只读挂载该 index，并在每次启动时把 `current` 对应的完整 manifest/Chroma/BM25 版本单元重建到 state 目录下的 `runtime-index` 可写副本。应用和 readiness 只打开这个副本；不要将权威 index 改为可写。启动发布时 state 会同时保留旧 runtime 和新 generation，应预留至少两者大小之和；当新旧版本相当时约为当前索引的 2 倍，另加 runtime SQLite/WAL 与文件系统余量。Compose 让 Docker 动态分配 `backend` 与 `provider-egress` bridge subnet，不预占固定网段；`ICML_PAPERS_TRUSTED_PROXY_NETWORKS` 只控制应用信任哪些代理来源，并不分配 Docker 网络。部署前应把它收敛到实际 TLS sidecar 所在的 backend 网段。
 
 Compose 和 Nginx 示例包含项目公共域名，复制到其他服务器前必须替换域名、证书路径和 Host/Origin 白名单。
 
 ## 备份与恢复
 
-索引和 runtime state 必须作为一组备份。为避免 Chroma 与 SQLite 快照不一致，先停止 MCP 进程或容器，再复制完整的 `.data/index` 与 `.data/state` 目录：
+权威索引和 runtime state 必须作为一组冷备。为避免 Chroma 与 SQLite 快照不一致，先停止 MCP 进程或容器，再复制 `.data/index` 与 `.data/state`；容器入口生成的 `state/runtime-index` 是可再生副本，不属于备份的权威数据：
 
 ```bash
-tar -C .data -czf icml-paper-search-backup.tgz index state
+tar -C .data --exclude='state/runtime-index' -czf icml-paper-search-backup.tgz index state
 ```
 
 恢复也应在服务停止时进行，并保留原目录结构和文件权限。恢复后先运行 `uv run icml-papers info`，再启动服务并检查 `/health/ready`。若 embedding 模型、维度、语料哈希或 RRF 配置与 manifest 不一致，readiness 会拒绝服务；不要只恢复 Chroma 或只复制 `runtime.sqlite3` 而遗漏同目录的 WAL 文件。
 
-容器部署遵循同一原则：停止单进程应用后，同时快照 index/state bind mount，再在同一配置契约下恢复。
+容器部署遵循同一原则：停止单进程应用后，同时快照 canonical index 和 state bind mount 中除 `runtime-index` 外的持久数据。恢复后由容器入口从 canonical `current` 重建可写副本。
 
 ## 安全与隐私
 

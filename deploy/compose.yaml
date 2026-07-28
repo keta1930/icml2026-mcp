@@ -3,7 +3,6 @@ name: icml-paper-search-mcp
 x-app-environment: &app-environment
   HOME: /tmp
   ICML_PAPERS_DATA_DIR: /app/data
-  ICML_PAPERS_INDEX_ROOT: /var/lib/icml-paper-search/index
   ICML_PAPERS_STATE_DB_PATH: /var/lib/icml-paper-search/state/runtime.sqlite3
   ICML_PAPERS_DASHSCOPE_API_KEY_FILE: /run/icml-runtime-secrets/dashscope_api_key
   ICML_PAPERS_SERVER_HOST: 0.0.0.0
@@ -20,7 +19,7 @@ x-logging: &bounded-logging
     max-file: "3"
 
 x-app-security: &app-security
-  # 入口仅以 root 复制 0400 secret，随后在 exec app 前降权为 uid 10001。
+  # 入口以 root 准备 0400 secret，降权后由 uid 10001 重建 runtime index。
   user: "0:0"
   read_only: true
   init: true
@@ -54,7 +53,10 @@ services:
   icml-mcp:
     image: ${ICML_MCP_IMAGE:?Set ICML_MCP_IMAGE to an immutable git-SHA tag}
     container_name: icml-mcp
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      ICML_BOOTSTRAP_INDEX_ROOT: /var/lib/icml-paper-search/index
+      ICML_PAPERS_INDEX_ROOT: /var/lib/icml-paper-search/state/runtime-index
     secrets:
       - source: dashscope_api_key
         target: dashscope_api_key
@@ -99,7 +101,9 @@ services:
     image: ${ICML_MCP_IMAGE:?Set ICML_MCP_IMAGE to an immutable git-SHA tag}
     profiles:
       - build
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      ICML_PAPERS_INDEX_ROOT: /var/lib/icml-paper-search/index
     command:
       - icml-papers
       - build
