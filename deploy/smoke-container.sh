@@ -15,7 +15,10 @@ docker run --rm --entrypoint icml-papers "$image" info >/dev/null
 set +e
 server_output="$(
     timeout --signal=TERM --kill-after=5s 3s \
-        docker run --rm --entrypoint icml-paper-search-mcp "$image" --help 2>&1
+        docker run --rm \
+        --env ICML_PAPERS_INDEX_ROOT=/var/lib/icml-paper-search/index \
+        --env ICML_PAPERS_STATE_DB_PATH=/var/lib/icml-paper-search/state/smoke.sqlite3 \
+        --entrypoint icml-paper-search-mcp "$image" --help 2>&1
 )"
 server_status=$?
 set -e
@@ -29,6 +32,16 @@ case "$server_status" in
 esac
 
 if ! printf '%s\n' "$server_output" | grep -q "starting streamable-http MCP server"; then
+    printf '%s\n' "$server_output" | sed -n '1,80p' >&2
+    exit 1
+fi
+
+if ! printf '%s\n' "$server_output" | grep -q "Application startup complete"; then
+    printf '%s\n' "$server_output" | sed -n '1,80p' >&2
+    exit 1
+fi
+
+if printf '%s\n' "$server_output" | grep -q "Application startup failed"; then
     printf '%s\n' "$server_output" | sed -n '1,80p' >&2
     exit 1
 fi

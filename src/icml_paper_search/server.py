@@ -13,6 +13,7 @@ import anyio
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -41,7 +42,7 @@ ICML 2026 论文库（6341 篇）的 Chroma dense + SQLite BM25 混合检索。
 
 @dataclass(slots=True)
 class ApplicationResources:
-    """在 FastMCP lifespan 中一次创建并统一关闭进程资源。"""
+    """在 ASGI 进程 lifespan 中一次创建并统一关闭共享资源。"""
 
     settings: Settings
     database: RuntimeDatabase | None = None
@@ -50,33 +51,42 @@ class ApplicationResources:
     admission: AdmissionController | None = None
     limiters: ThreadLimiters | None = None
     initialized: bool = False
+    _closed: bool = False
 
     def initialize(self) -> None:
         """初始化 state 与延迟客户端，不触发 DashScope 调用。"""
         if self.initialized:
             return
-        database = self.database or RuntimeDatabase(
-            self.settings.state_db_path,
-            busy_timeout_ms=self.settings.sqlite_busy_timeout_ms,
-        )
-        database.initialize()
-        self.database = database
-        self.service = self.service or PaperSearchService(
-            self.settings, database=database
-        )
-        self.rate_limiter = self.rate_limiter or SQLiteRateLimiter(
-            database, self.settings
-        )
-        self.admission = self.admission or AdmissionController(
-            self.settings.search_queue_size,
-            self.settings.queue_timeout_seconds,
-            worker_size=min(
+        if self._closed:
+            raise RuntimeError("application resources 已关闭")
+        try:
+            database = self.database or RuntimeDatabase(
+                self.settings.state_db_path,
+                busy_timeout_ms=self.settings.sqlite_busy_timeout_ms,
+            )
+            self.database = database
+            database.initialize()
+            self.service = self.service or PaperSearchService(
+                self.settings, database=database
+            )
+            self.rate_limiter = self.rate_limiter or SQLiteRateLimiter(
+                database, self.settings
+            )
+            self.admission = self.admission or AdmissionController(
                 self.settings.search_queue_size,
-                max(self.settings.provider_concurrency, 4),
-            ),
-        )
-        self.limiters = self.limiters or ThreadLimiters.from_settings(self.settings)
-        self.initialized = True
+                self.settings.queue_timeout_seconds,
+                worker_size=min(
+                    self.settings.search_queue_size,
+                    max(self.settings.provider_concurrency, 4),
+                ),
+            )
+            self.limiters = self.limiters or ThreadLimiters.from_settings(
+                self.settings
+            )
+            self.initialized = True
+        except Exception:
+            self.close()
+            raise
 
     def readiness(self) -> None:
         """只检查本地 state/index，不读取 key 或访问 provider。"""
@@ -89,17 +99,48 @@ class ApplicationResources:
 
     def close(self) -> None:
         """按依赖顺序关闭引擎/provider 与 runtime database。"""
-        if not self.initialized:
+        if self._closed:
             return
-        if self.service is not None:
-            self.service.close()
-        if self.database is not None:
-            self.database.close()
-        self.initialized = False
+        self._closed = True
+        try:
+            if self.service is not None:
+                self.service.close()
+        finally:
+            try:
+                if self.database is not None:
+                    self.database.close()
+            finally:
+                self.initialized = False
 
     def _require_initialized(self) -> None:
         if not self.initialized:
             raise RuntimeError("application resources 尚未初始化")
+
+
+class ApplicationFastMCP(FastMCP):
+    """组合 ASGI 进程资源与 FastMCP session-manager lifespan。"""
+
+    def __init__(self, *args: Any, resources: ApplicationResources, **kwargs: Any):
+        self._icml_resources = resources
+        super().__init__(*args, **kwargs)
+
+    def streamable_http_app(self) -> Starlette:
+        """创建同时管理进程资源与 Streamable HTTP session 的 ASGI app。"""
+        app = super().streamable_http_app()
+        session_manager_lifespan = app.router.lifespan_context
+        resources = self._icml_resources
+
+        @asynccontextmanager
+        async def application_lifespan(starlette_app: Starlette):
+            await anyio.to_thread.run_sync(resources.initialize)
+            try:
+                async with session_manager_lifespan(starlette_app) as state:
+                    yield state
+            finally:
+                await anyio.to_thread.run_sync(resources.close)
+
+        app.router.lifespan_context = application_lifespan
+        return app
 
 
 def create_mcp(
@@ -111,20 +152,12 @@ def create_mcp(
     config = settings or get_settings()
     app_resources = resources or ApplicationResources(config)
 
-    @asynccontextmanager
-    async def lifespan(_server: FastMCP):
-        await anyio.to_thread.run_sync(app_resources.initialize)
-        try:
-            yield app_resources
-        finally:
-            await anyio.to_thread.run_sync(app_resources.close)
-
-    server = FastMCP(
+    server = ApplicationFastMCP(
         "icml-paper-search",
+        resources=app_resources,
         instructions=INSTRUCTIONS,
         host=config.server_host,
         port=config.server_port,
-        lifespan=lifespan,
         transport_security=_transport_security(config),
     )
     _register_tools(server)
@@ -398,10 +431,10 @@ async def _run_state(resources: ApplicationResources, operation: Callable[[], An
 
 
 def _resources(ctx: Context) -> ApplicationResources:
-    """从 FastMCP request context 取得 lifespan 资源。"""
-    resources = ctx.request_context.lifespan_context
+    """从稳定的进程级 FastMCP 容器取得共享资源。"""
+    resources = getattr(ctx.fastmcp, "_icml_resources", None)
     if not isinstance(resources, ApplicationResources):
-        raise RuntimeError("FastMCP lifespan context 无效")
+        raise RuntimeError("FastMCP application resources 无效")
     resources._require_initialized()
     return resources
 

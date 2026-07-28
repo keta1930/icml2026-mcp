@@ -7,12 +7,16 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
+import pytest
 from mcp.server.fastmcp import Context
 from mcp.server.lowlevel.server import RequestContext
 from starlette.requests import Request
+from starlette.testclient import TestClient
 
 from icml_paper_search.config import Settings
+from icml_paper_search.governance import ThreadLimiters
 from icml_paper_search.models import (
     Paper,
     SearchFilters,
@@ -66,7 +70,138 @@ def _context(resources: ApplicationResources, *, peer="198.51.100.10", headers=(
         lifespan_context=resources,
         request=Request(scope),
     )
-    return Context(request_context=request_context)
+    return Context(
+        request_context=request_context,
+        fastmcp=SimpleNamespace(_icml_resources=resources),
+    )
+
+
+class LifecycleResources(ApplicationResources):
+    """记录真实 ASGI 与 transport 生命周期对进程资源的影响。"""
+
+    def __init__(self, settings: Settings, *, fail_initialize: bool = False) -> None:
+        super().__init__(settings)
+        self.fail_initialize = fail_initialize
+        self.initialize_calls = 0
+        self.close_calls = 0
+
+    def initialize(self) -> None:
+        if self.initialized:
+            return
+        self.initialize_calls += 1
+        if self.fail_initialize:
+            raise RuntimeError("startup failed")
+        self.limiters = ThreadLimiters.from_settings(self.settings)
+        self.initialized = True
+
+    def readiness(self) -> None:
+        self._require_initialized()
+
+    def close(self) -> None:
+        if not self.initialized:
+            return
+        self.close_calls += 1
+        self.initialized = False
+
+
+class LocalLifecycleService:
+    """提供零 provider 的本地 readiness 与可计数关闭边界。"""
+
+    def __init__(self) -> None:
+        self.validate_calls = 0
+        self.close_calls = 0
+
+    def validate(self) -> None:
+        self.validate_calls += 1
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class FailingDatabase:
+    """模拟 state 初始化失败并记录清理。"""
+
+    def __init__(self) -> None:
+        self.initialize_calls = 0
+        self.close_calls = 0
+
+    def initialize(self) -> None:
+        self.initialize_calls += 1
+        raise RuntimeError("state startup failed")
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+_MCP_HEADERS = {
+    "accept": "application/json, text/event-stream",
+    "content-type": "application/json",
+    "mcp-protocol-version": "2025-11-25",
+}
+
+
+def _open_transport(client: TestClient, request_id: int) -> str:
+    """通过真实 Streamable HTTP initialize 建立一个 transport。"""
+    response = client.post(
+        "/mcp",
+        headers=_MCP_HEADERS,
+        json={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "lifespan-test", "version": "1"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    session_id = response.headers["mcp-session-id"]
+    initialized = client.post(
+        "/mcp",
+        headers={**_MCP_HEADERS, "mcp-session-id": session_id},
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+    )
+    assert initialized.status_code == 202
+    return session_id
+
+
+def _list_tools(client: TestClient, session_id: str, request_id: int) -> None:
+    """在指定 transport 上执行一个真实 MCP tool-list 请求。"""
+    response = client.post(
+        "/mcp",
+        headers={**_MCP_HEADERS, "mcp-session-id": session_id},
+        json={"jsonrpc": "2.0", "id": request_id, "method": "tools/list"},
+    )
+    assert response.status_code == 200
+    assert "search_papers" in response.text
+
+
+def _call_status_without_capability(
+    client: TestClient, session_id: str, request_id: int
+) -> None:
+    """调用一个读取进程资源、但不会访问 provider 的真实 MCP tool。"""
+    response = client.post(
+        "/mcp",
+        headers={**_MCP_HEADERS, "mcp-session-id": session_id},
+        json={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": "search_session_status", "arguments": {}},
+        },
+    )
+    assert response.status_code == 200
+    assert "error[invalid_request]" in response.text
+
+
+def _close_transport(client: TestClient, session_id: str) -> None:
+    """终止一个真实 Streamable HTTP transport。"""
+    response = client.delete(
+        "/mcp", headers={**_MCP_HEADERS, "mcp-session-id": session_id}
+    )
+    assert response.status_code == 200
 
 
 def test_six_tools_are_async_and_context_is_not_in_schema(tmp_path):
@@ -85,6 +220,109 @@ def test_six_tools_are_async_and_context_is_not_in_schema(tmp_path):
     assert all("ctx" not in tool.parameters.get("properties", {}) for tool in tools.values())
     assert tools["search_papers"].parameters["properties"]["query"]["maxLength"] == 2000
     assert tools["get_papers"].parameters["properties"]["paper_ids"]["maxItems"] == 50
+
+
+def test_asgi_startup_initializes_resources_before_first_transport(tmp_path):
+    """ASGI startup 后即 ready，且 FastMCP session manager 同时运行。"""
+    resources = LifecycleResources(_settings(tmp_path))
+    server = create_mcp(resources.settings, resources=resources)
+    app = server.streamable_http_app()
+
+    with TestClient(app, base_url="http://127.0.0.1:20441") as client:
+        assert resources.initialize_calls == 1
+        assert resources.close_calls == 0
+        assert server.session_manager._task_group is not None
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ready"}
+
+    assert resources.close_calls == 1
+    assert not resources.initialized
+
+
+def test_two_transports_do_not_own_shared_application_resources(tmp_path):
+    """关闭一个 transport 不得关闭另一个 transport 使用的共享资源。"""
+    resources = LifecycleResources(_settings(tmp_path))
+    server = create_mcp(resources.settings, resources=resources)
+
+    with TestClient(
+        server.streamable_http_app(), base_url="http://127.0.0.1:20441"
+    ) as client:
+        first = _open_transport(client, 1)
+        second = _open_transport(client, 2)
+        _list_tools(client, first, 3)
+        _list_tools(client, second, 4)
+
+        _close_transport(client, first)
+
+        assert resources.initialize_calls == 1
+        assert resources.close_calls == 0
+        assert client.get("/health/ready").status_code == 200
+        _call_status_without_capability(client, second, 5)
+        _close_transport(client, second)
+        assert client.get("/health/ready").status_code == 200
+
+    assert resources.close_calls == 1
+
+
+def test_asgi_startup_failure_fails_closed(tmp_path):
+    """资源初始化失败必须阻断 ASGI startup，不能先对外服务。"""
+    resources = LifecycleResources(_settings(tmp_path), fail_initialize=True)
+    server = create_mcp(resources.settings, resources=resources)
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        with TestClient(
+            server.streamable_http_app(), base_url="http://127.0.0.1:20441"
+        ):
+            pytest.fail("startup failure 后不应进入服务上下文")
+
+    assert resources.initialize_calls == 1
+    assert resources.close_calls == 0
+
+
+def test_real_resources_start_locally_and_close_once(tmp_path, monkeypatch):
+    """真实资源容器在 startup 不读取 key，shutdown 后重复关闭无副作用。"""
+    settings = _settings(tmp_path)
+    service = LocalLifecycleService()
+    resources = ApplicationResources(settings, service=service)  # type: ignore[arg-type]
+    server = create_mcp(settings, resources=resources)
+
+    def reject_key_resolution(_settings: Settings) -> str:
+        raise AssertionError("ASGI lifecycle 不得读取 provider key")
+
+    monkeypatch.setattr(Settings, "resolve_dashscope_api_key", reject_key_resolution)
+
+    with TestClient(
+        server.streamable_http_app(), base_url="http://127.0.0.1:20441"
+    ) as client:
+        assert settings.state_db_path.is_file()
+        assert client.get("/health/ready").status_code == 200
+        assert service.validate_calls == 1
+
+    assert service.close_calls == 1
+    resources.close()
+    assert service.close_calls == 1
+
+
+def test_partial_startup_failure_closes_owned_resources(tmp_path):
+    """真实资源初始化中途失败时清理一次，且 session manager 不启动。"""
+    database = FailingDatabase()
+    resources = ApplicationResources(
+        _settings(tmp_path), database=database  # type: ignore[arg-type]
+    )
+    server = create_mcp(resources.settings, resources=resources)
+
+    with pytest.raises(RuntimeError, match="state startup failed"):
+        with TestClient(
+            server.streamable_http_app(), base_url="http://127.0.0.1:20441"
+        ):
+            pytest.fail("state startup failure 后不应进入服务上下文")
+
+    assert database.initialize_calls == 1
+    assert database.close_calls == 1
+    assert server.session_manager._task_group is None
+    resources.close()
+    assert database.close_calls == 1
 
 
 def test_safe_error_does_not_echo_internal_message():
