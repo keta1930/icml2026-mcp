@@ -66,6 +66,7 @@ def _outcome_header(outcome: SearchOutcome) -> str:
     parts.append(f"新增 {len(outcome.hits)} 条")
     parts.append(f"去重隐藏 {outcome.duplicates_suppressed} 条")
     parts.append(f"窗口 {outcome.candidates_examined}/{outcome.search_depth} 条")
+    parts.append("score=weighted-RRF[0,1]")
     if outcome.session_id:
         parts.append(f"会话累计 {outcome.session_unique_total} 篇")
         if outcome.consecutive_empty_rounds:
@@ -169,10 +170,13 @@ def _paper_lines(
     return lines
 
 
-def format_session_summary(summary: SessionSummary, *, title: str) -> str:
+def format_session_summary(
+    summary: SessionSummary, *, title: str, include_session_id: bool = True
+) -> str:
     """渲染会话状态或关闭汇总。"""
+    heading = f"{title}：{summary.session_id}" if include_session_id else title
     lines = [
-        f"{title}：{summary.session_id}",
+        heading,
         f"    label={summary.label or 'untitled'}",
         f"    创建于 {_ts(summary.created_at)}，最后活跃 {_ts(summary.last_active_at)}",
         f"    query {summary.query_count} 次，去重后累计 {summary.unique_papers} 篇论文",
@@ -188,31 +192,22 @@ def format_session_summary(summary: SessionSummary, *, title: str) -> str:
         lines.append("query 轨迹：")
         for n, record in enumerate(summary.queries, 1):
             suffix = f"，filters=({record.filters_desc})" if record.filters_desc else ""
+            query_label = record.query_summary or f"hash:{record.query_hash[:12]}"
             lines.append(
-                f"  {n}. {record.query!r} → 新增 {record.new_hits}，"
-                f"去重 {record.duplicates_suppressed}{suffix}"
+                f"  {n}. {query_label} → 新增 {record.new_hits}，"
+                f"去重 {record.duplicates_suppressed}，"
+                f"候选 {record.candidates_examined}{suffix}"
             )
+        if summary.audit_truncated:
+            lines.append("  … query 审计记录已按安全上限截断")
 
     if summary.papers:
         lines.append("")
         lines.append(f"已检索论文（{len(summary.papers)} 篇）：")
         for n, (paper_id, paper_title) in enumerate(summary.papers, 1):
             lines.append(f"  {n}. [{paper_id}] {paper_title}")
-    return "\n".join(lines)
-
-
-def format_session_list(summaries: list[SessionSummary]) -> str:
-    """渲染存活会话列表。"""
-    if not summaries:
-        return "当前没有存活的检索会话。"
-    lines = [f"存活会话 {len(summaries)} 个："]
-    for summary in summaries:
-        flag = " [已挖尽]" if summary.exhausted else ""
-        lines.append(
-            f"  {summary.session_id}  label={summary.label}  "
-            f"query={summary.query_count}  papers={summary.unique_papers}"
-            f"  最后活跃 {_ts(summary.last_active_at)}{flag}"
-        )
+        if summary.papers_truncated:
+            lines.append("  … 论文清单已按输出上限截断")
     return "\n".join(lines)
 
 

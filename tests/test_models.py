@@ -1,57 +1,58 @@
-"""领域模型：Milvus entity 反序列化与 filter 表达式拼装。"""
+"""验证 backend-neutral 领域模型。"""
 
 from __future__ import annotations
 
-from icml_paper_search.models import Paper, SearchFilters
+import pytest
+
+from icml_paper_search.models import Paper, SearchFilters, SearchHit
 
 
-def test_paper_from_entity_parses_json_authors():
-    paper = Paper.from_entity(
+def test_paper_from_mapping_accepts_backend_aliases():
+    paper = Paper.from_mapping(
         {
             "orid": "abc123",
             "title": "T",
             "abstract": "A",
             "authors": '["Alice", "Bob"]',
             "area": "Theory",
-            "sub": "",
+            "sub": "Learning Theory",
             "type": "Oral",
             "spot": True,
             "arxiv": "2605.00001",
         }
     )
+
+    assert paper.paper_id == "abc123"
     assert paper.authors == ("Alice", "Bob")
+    assert paper.subarea == "Learning Theory"
+    assert paper.paper_type == "Oral"
     assert paper.spotlight is True
     assert paper.openreview_url.endswith("abc123")
     assert paper.arxiv_url == "https://arxiv.org/abs/2605.00001"
 
 
-def test_paper_from_entity_tolerates_bad_authors():
-    """authors 字段脏了也不该让整条结果炸掉。"""
-    assert Paper.from_entity({"authors": "not json"}).authors == ("not json",)
-    assert Paper.from_entity({"authors": None}).authors == ()
-    assert Paper.from_entity({"authors": ["X"]}).authors == ("X",)
+def test_paper_from_mapping_tolerates_metadata_shapes():
+    assert Paper.from_mapping({"authors": "not json"}).authors == ("not json",)
+    assert Paper.from_mapping({"authors": None}).authors == ()
+    assert Paper.from_mapping({"authors": ("X",)}).authors == ("X",)
+    assert Paper.from_mapping({"spotlight": "true"}).spotlight is True
+    assert Paper.from_mapping({"paper_id": "x"}).arxiv_url == ""
 
 
-def test_paper_without_arxiv_has_no_arxiv_url():
-    assert Paper.from_entity({"orid": "x"}).arxiv_url == ""
+def test_filters_only_describe_domain_values():
+    filters = SearchFilters(area='Deep "Learning"', paper_type="Oral", spotlight_only=True)
 
-
-def test_filters_build_conjunctive_expr():
-    filters = SearchFilters(area="Deep Learning", paper_type="Oral", spotlight_only=True)
-    assert filters.to_expr() == (
-        'area == "Deep Learning" and type == "Oral" and spot == true'
-    )
+    assert filters.describe() == 'area=Deep "Learning", type=Oral, spotlight-only'
     assert not filters.is_empty
+    assert SearchFilters().is_empty
+    assert SearchFilters().describe() == ""
+    assert not hasattr(filters, "to_expr")
 
 
-def test_empty_filters_produce_no_expr():
-    filters = SearchFilters()
-    assert filters.to_expr() == ""
-    assert filters.is_empty
-    assert filters.describe() == ""
+def test_search_hit_score_is_normalized():
+    paper = Paper.from_mapping({"paper_id": "p1"})
 
-
-def test_filter_values_are_escaped():
-    """带引号的取值不能逃出字符串字面量。"""
-    expr = SearchFilters(area='Deep "Learning"').to_expr()
-    assert expr == 'area == "Deep \\"Learning\\""'
+    assert SearchHit(paper=paper, score=0.0).score == 0.0
+    assert SearchHit(paper=paper, score=1.0).score == 1.0
+    with pytest.raises(ValueError, match=r"\[0,1\]"):
+        SearchHit(paper=paper, score=1.01)

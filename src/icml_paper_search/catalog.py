@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -14,7 +16,7 @@ from .config import Settings, get_settings
 
 @dataclass(frozen=True, slots=True)
 class PaperRecord:
-    """待入库的一条论文记录（含 BM25 分词用的拼接文本）。"""
+    """Chroma 与 FTS5 共享的一条规范化论文记录。"""
 
     fields: dict[str, Any]
     text: str
@@ -54,6 +56,41 @@ def load_records(settings: Settings | None = None) -> list[PaperRecord]:
             )
         )
     return records
+
+
+def corpus_hash(records: list[PaperRecord]) -> str:
+    """计算与输入顺序无关的规范语料 SHA-256。"""
+    digest = hashlib.sha256()
+    for record in sorted(records, key=lambda item: item.paper_id):
+        payload = {"fields": record.fields, "text": record.text}
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def paper_ids_hash(paper_ids: Iterable[str]) -> str:
+    """计算排序后论文 id 集合的稳定 SHA-256。"""
+    digest = hashlib.sha256()
+    for paper_id in sorted(paper_ids):
+        encoded = paper_id.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def data_file_hashes(settings: Settings | None = None) -> dict[str, str]:
+    """返回构成语料的原始数据文件 SHA-256。"""
+    cfg = settings or get_settings()
+    return {
+        "index.json": _file_hash(cfg.index_path),
+        "abstracts.json": _file_hash(cfg.abstracts_path),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,3 +143,14 @@ def _read_json(path: Path) -> Any:
         )
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _file_hash(path: Path) -> str:
+    """流式计算单个数据文件 SHA-256。"""
+    if not path.exists():
+        raise FileNotFoundError(f"缺少数据文件 {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

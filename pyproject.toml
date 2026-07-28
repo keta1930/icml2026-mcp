@@ -5,13 +5,11 @@ description = "MCP server for deduplicated hybrid search over the ICML 2026 pape
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "chromadb>=1.0.0,<2",
+    "dashscope>=1.24.0,<2",
     "mcp>=1.26.0",
-    "peft>=0.19.1",
     "pydantic>=2.11",
     "pydantic-settings>=2.12",
-    "pymilvus==2.5.18",
-    "sentence-transformers>=5.6.0",
-    "torch==2.8.0",
 ]
 
 [project.scripts]
@@ -19,7 +17,11 @@ icml-paper-search-mcp = "icml_paper_search.server:main"
 icml-papers = "icml_paper_search.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.4.0"]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,14 +29,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/icml_paper_search"]
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cu129", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
-
-[[tool.uv.index]]
-name = "pytorch-cu129"
-url = "https://download.pytorch.org/whl/cu129"
-explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

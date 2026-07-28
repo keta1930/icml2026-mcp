@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from icml_paper_search.errors import InvalidRequestError, SessionCapacityReached
 from icml_paper_search.models import SearchFilters
 from icml_paper_search.sessions import SessionNotFoundError
 
@@ -162,7 +163,8 @@ def test_close_session_returns_full_summary(service):
     assert summary.query_count == 1
     assert summary.unique_papers == len(outcome.hits)
     assert len(summary.papers) == len(outcome.hits)
-    assert summary.queries[0].query == "q"
+    assert len(summary.queries[0].query_hash) == 64
+    assert summary.queries[0].query_summary is None
 
     with pytest.raises(SessionNotFoundError):
         service.search("q", session_id=session_id)
@@ -187,15 +189,13 @@ def test_top_k_is_clamped(service, settings):
 
 
 def test_empty_query_rejected(service):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidRequestError):
         service.search("   ")
 
 
-def test_session_capacity_evicts_least_recently_used(service, settings):
-    """会话数超上限时回收最久未活跃的，不无限增长。"""
-    ids = [service.open_session(label=str(n)).session_id for n in range(settings.max_sessions + 2)]
-    alive = {s.session_id for s in service.list_sessions()}
-
-    assert len(alive) <= settings.max_sessions
-    assert ids[-1] in alive
-    assert ids[0] not in alive
+def test_session_capacity_rejects_without_cross_user_eviction(service, settings):
+    """会话数超上限时稳定拒绝，不回收其他调用方的活跃 capability。"""
+    ids = [service.open_session(label=str(n)).session_id for n in range(settings.max_sessions)]
+    with pytest.raises(SessionCapacityReached):
+        service.open_session(label="overflow")
+    assert service.session_status(ids[0]).session_id == ids[0]

@@ -6,7 +6,12 @@ import json
 
 import pytest
 
-from icml_paper_search.catalog import get_catalog, load_records
+from icml_paper_search.catalog import (
+    corpus_hash,
+    data_file_hashes,
+    get_catalog,
+    load_records,
+)
 from icml_paper_search.config import Settings
 
 INDEX = {
@@ -91,3 +96,14 @@ def test_catalog_render_lists_filter_values(data_dir):
 def test_missing_data_file_names_the_path(tmp_path):
     with pytest.raises(FileNotFoundError, match="index.json"):
         load_records(Settings(data_dir=tmp_path))
+
+
+def test_corpus_hash_is_stable_across_record_order(data_dir):
+    records = load_records(Settings(data_dir=data_dir))
+    assert corpus_hash(records) == corpus_hash(list(reversed(records)))
+
+
+def test_data_file_hashes_cover_both_snapshots(data_dir):
+    hashes = data_file_hashes(Settings(data_dir=data_dir))
+    assert set(hashes) == {"index.json", "abstracts.json"}
+    assert all(len(value) == 64 for value in hashes.values())

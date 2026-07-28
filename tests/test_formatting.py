@@ -6,7 +6,6 @@ from icml_paper_search.config import Settings
 from icml_paper_search.formatting import (
     format_papers,
     format_search_outcome,
-    format_session_list,
     format_session_summary,
 )
 from icml_paper_search.models import SearchFilters
@@ -44,9 +43,9 @@ def test_empty_outcome_without_candidates_flags_filters(service, settings):
 
 def test_empty_outcome_blames_min_score_not_the_corpus(service, settings):
     """被 min_score 筛空时要说清是分数门槛，别谎报语料无此主题。"""
-    outcome = service.search("q", min_score=99.0)
+    outcome = service.search("q", min_score=1.0)
     text = format_search_outcome(outcome, settings)
-    assert "min_score=99.0" in text
+    assert "min_score=1.0" in text
     assert "没有匹配结果" not in text
 
 
@@ -101,9 +100,6 @@ def test_session_summary_includes_query_trace(service):
 
     text = format_session_summary(summary, title="已关闭检索会话")
     assert "topic" in text
-    assert "alpha" in text
+    assert "hash:" in text
+    assert "alpha" not in text
     assert "已检索论文" in text
-
-
-def test_session_list_handles_empty(service):
-    assert "没有存活" in format_session_list([])

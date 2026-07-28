@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .errors import EmbeddingConfigurationError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    """运行时配置，从环境变量与 `.env` 读取。"""
+    """定义开源单节点服务的运行时边界。"""
 
     model_config = SettingsConfigDict(
         env_prefix="ICML_PAPERS_",
@@ -22,88 +24,163 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- 数据与向量库 ---
-    data_dir: Path = Field(
-        default=PROJECT_ROOT / "data",
-        description="index.json / abstracts.json 所在目录",
-    )
-    milvus_uri: str = Field(
-        default="http://localhost:20340", description="Milvus gRPC 入口"
-    )
-    milvus_token: str = Field(default="", description="Milvus 认证 token，留空表示无认证")
-    collection: str = Field(
-        default="icml2026repro_papers", description="论文 collection 名"
-    )
+    data_dir: Path = Field(default=PROJECT_ROOT / "data")
+    index_root: Path = Field(default=PROJECT_ROOT / ".data" / "index")
+    state_db_path: Path = Field(default=PROJECT_ROOT / ".data/state/runtime.sqlite3")
+    sqlite_busy_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
 
-    # --- Embedding 模型 ---
-    embedding_model_path: str = Field(
-        default="/home/yyx/projects/infra/model/jina-embeddings-v5-text-small",
-        description="jina-embeddings-v5 本地路径或 HF repo id",
-    )
-    embedding_device: str = Field(default="cuda", description="torch device")
-    embedding_dtype: Literal["bfloat16", "float16", "float32"] = Field(
-        default="bfloat16", description="模型权重精度"
-    )
-    embedding_dim: int = Field(default=1024, description="dense 向量维度")
-    embedding_batch_size: int = Field(default=64, description="入库时的编码 batch")
+    dashscope_api_key: SecretStr | None = Field(default=None, repr=False)
+    dashscope_api_key_file: Path | None = None
+    dashscope_http_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
+    embedding_model: str = "qwen3.7-text-embedding"
+    embedding_dim: int = Field(default=1_024, ge=1)
+    embedding_batch_size: int = Field(default=20, ge=1, le=20)
+    embedding_max_attempts: int = Field(default=3, ge=1, le=5)
+    embedding_deadline_seconds: float = Field(default=12.0, gt=0, le=60)
 
-    # --- 混合检索排序权重 ---
-    dense_weight: float = Field(default=0.8, ge=0.0, description="向量召回权重")
-    bm25_weight: float = Field(default=0.2, ge=0.0, description="BM25 召回权重")
+    dense_weight: float = Field(default=0.8, ge=0.0, le=1.0)
+    bm25_weight: float = Field(default=0.2, ge=0.0, le=1.0)
+    rrf_k: int = Field(default=60, ge=1)
 
-    # --- 检索规模 ---
-    default_top_k: int = Field(default=10, ge=1, description="未指定时返回的新条目数")
-    max_top_k: int = Field(default=50, ge=1, description="单次检索允许的最大新条目数")
-    depth_multiplier: int = Field(
-        default=4,
-        ge=1,
-        description="检索窗口 = top_k × 该倍数；窗口内做去重，决定一个 query 能挖多深",
-    )
-    max_search_depth: int = Field(
-        default=200, ge=1, description="检索窗口深度上限，防止下探到无关结果"
-    )
+    default_top_k: int = Field(default=10, ge=1)
+    max_top_k: int = Field(default=50, ge=1)
+    depth_multiplier: int = Field(default=4, ge=1)
+    max_search_depth: int = Field(default=200, ge=1)
+    max_query_chars: int = Field(default=2_000, ge=1)
+    max_get_paper_ids: int = Field(default=50, ge=1)
 
-    # --- 会话 ---
-    session_idle_ttl_seconds: int = Field(
-        default=86_400, ge=60, description="会话空闲多久后可被回收"
-    )
-    max_sessions: int = Field(default=32, ge=1, description="同时存活的会话上限")
-    exhausted_after_empty_rounds: int = Field(
-        default=3, ge=1, description="连续多少轮零新增即判定该方向检索完毕"
-    )
+    session_idle_ttl_seconds: int = Field(default=86_400, ge=60)
+    max_sessions: int = Field(default=256, ge=1)
+    exhausted_after_empty_rounds: int = Field(default=3, ge=1)
+    max_session_rounds: int = Field(default=200, ge=1)
+    max_session_seen: int = Field(default=6_341, ge=1)
+    max_session_audit_records: int = Field(default=200, ge=0)
+    session_summary_paper_limit: int = Field(default=500, ge=0)
+    session_label_max_chars: int = Field(default=120, ge=1)
 
-    # --- 输出裁剪 ---
-    abstract_preview_chars: int = Field(
-        default=360, ge=0, description="列表里摘要的截断长度，0 表示不带摘要"
-    )
-    max_authors_shown: int = Field(default=4, ge=0, description="列表里展示的作者数")
+    provider_concurrency: int = Field(default=4, ge=1)
+    chroma_concurrency: int = Field(default=2, ge=1)
+    search_queue_size: int = Field(default=64, ge=1)
+    queue_timeout_seconds: float = Field(default=10.0, gt=0)
+    ip_rate_per_minute: int = Field(default=6, ge=1)
+    ip_rate_burst: int = Field(default=3, ge=1)
+    ip_searches_per_day: int = Field(default=200, ge=1)
+    ip_session_open_rate_per_minute: int = Field(default=3, ge=1)
+    ip_session_open_burst: int = Field(default=2, ge=1)
+    ip_session_opens_per_day: int = Field(default=20, ge=1)
+    global_rate_per_minute: int = Field(default=120, ge=1)
+    daily_token_budget: int = Field(default=500_000, ge=1)
+    monthly_token_budget: int = Field(default=10_000_000, ge=1)
+    embedding_cache_max_entries: int = Field(default=10_000, ge=0)
+    embedding_cache_ttl_seconds: int = Field(default=86_400, ge=0)
 
-    # --- MCP server（streamable HTTP transport）---
-    server_host: str = Field(
-        default="127.0.0.1", description="MCP server 监听地址，本机用 127.0.0.1"
+    abstract_preview_chars: int = Field(default=360, ge=0)
+    max_authors_shown: int = Field(default=4, ge=0)
+
+    server_host: str = "127.0.0.1"
+    server_port: int = Field(default=20_441, ge=1, le=65_535)
+    allowed_hosts: tuple[str, ...] = (
+        "127.0.0.1:*",
+        "localhost:*",
+        "[::1]:*",
+        "icml-mcp:*",
     )
-    server_port: int = Field(
-        default=20441, ge=1, le=65535, description="MCP server 监听端口（仓库端口段 20440-20449）"
+    allowed_origins: tuple[str, ...] = (
+        "http://127.0.0.1:*",
+        "http://localhost:*",
     )
+    trusted_proxy_enabled: bool = False
+    trusted_proxy_header: str = "X-ICML-Client-IP"
+    trusted_proxy_networks: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _check(self) -> Settings:
-        if self.dense_weight + self.bm25_weight <= 0:
-            raise ValueError("dense_weight 与 bm25_weight 不能同时为 0")
+        """拒绝会破坏索引、费用或服务边界的配置组合。"""
+        if abs((self.dense_weight + self.bm25_weight) - 1.0) > 1e-9:
+            raise ValueError("dense_weight 与 bm25_weight 之和必须为 1")
+        if self.embedding_model == "qwen3.7-text-embedding" and self.embedding_dim != 1_024:
+            raise ValueError("qwen3.7-text-embedding 必须使用 1024 维索引契约")
         if self.max_search_depth < self.max_top_k:
             raise ValueError("max_search_depth 必须 >= max_top_k")
+        if self.monthly_token_budget < self.daily_token_budget:
+            raise ValueError("monthly_token_budget 必须 >= daily_token_budget")
+        if self.ip_rate_burst > self.ip_rate_per_minute:
+            raise ValueError("ip_rate_burst 不能大于 ip_rate_per_minute")
+        if self.ip_session_open_burst > self.ip_session_open_rate_per_minute:
+            raise ValueError(
+                "ip_session_open_burst 不能大于 "
+                "ip_session_open_rate_per_minute"
+            )
+        if self.max_session_audit_records > self.max_session_rounds:
+            raise ValueError("max_session_audit_records 不能大于 max_session_rounds")
+        if self.index_root.resolve() == self.state_db_path.resolve():
+            raise ValueError("index_root 与 state_db_path 不能指向同一路径")
+        if self.trusted_proxy_enabled and not self.trusted_proxy_networks:
+            raise ValueError("启用 trusted proxy 时必须配置 trusted_proxy_networks")
+        if any(not _valid_allowed_host(value) for value in self.allowed_hosts):
+            raise ValueError("allowed_hosts 必须是 host[:port] 或 host:* 格式")
+        if any(not _valid_allowed_origin(value) for value in self.allowed_origins):
+            raise ValueError("allowed_origins 必须是 http(s) origin 或 :* 端口通配")
+        parsed = urlparse(self.dashscope_http_base_url)
+        host = (parsed.hostname or "").lower()
+        beijing = host == "dashscope.aliyuncs.com" or host.endswith(
+            ".cn-beijing.maas.aliyuncs.com"
+        )
+        if parsed.scheme != "https" or not beijing or parsed.path.rstrip("/") != "/api/v1":
+            raise ValueError("dashscope_http_base_url 必须是北京地域的 HTTPS native API")
         return self
+
+    def resolve_dashscope_api_key(self) -> str:
+        """按 secret 文件优先级解析 key，失败时只返回脱敏错误。"""
+        if self.dashscope_api_key_file is not None:
+            try:
+                value = self.dashscope_api_key_file.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise EmbeddingConfigurationError() from exc
+            if not value:
+                raise EmbeddingConfigurationError()
+            return value
+        if self.dashscope_api_key is not None:
+            value = self.dashscope_api_key.get_secret_value().strip()
+            if value:
+                return value
+        raise EmbeddingConfigurationError()
 
     @property
     def index_path(self) -> Path:
+        """返回论文元数据快照路径。"""
         return self.data_dir / "index.json"
 
     @property
     def abstracts_path(self) -> Path:
+        """返回论文摘要快照路径。"""
         return self.data_dir / "abstracts.json"
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """进程内单例配置。"""
+    """返回进程默认配置。"""
     return Settings()
+
+
+def _valid_allowed_host(value: str) -> bool:
+    """校验 FastMCP 支持的精确 host 或端口通配格式。"""
+    item = value.strip()
+    return bool(item) and "://" not in item and "/" not in item and (
+        "*" not in item or item.endswith(":*") and item.count("*") == 1
+    )
+
+
+def _valid_allowed_origin(value: str) -> bool:
+    """校验精确 HTTP origin，并仅允许端口位置使用通配。"""
+    item = value.strip()
+    parsed = urlparse(item[:-2] if item.endswith(":*") else item)
+    wildcard_valid = "*" not in item or item.endswith(":*") and item.count("*") == 1
+    return bool(
+        wildcard_valid
+        and parsed.scheme in {"http", "https"}
+        and parsed.hostname
+        and not parsed.path.rstrip("/")
+        and not parsed.query
+        and not parsed.fragment
+    )

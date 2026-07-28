@@ -1,7 +1,39 @@
 .venv/
 __pycache__/
 *.py[cod]
-.env
 .pytest_cache/
 *.egg-info/
-.file
+.file/
+
+# 本机配置与运行时 secret
+.env
+.env.*
+!.env.example
+secrets/
+.secrets/
+*.secret
+*.key
+*.pem
+dashscope_api_key*
+
+# Chroma、版本化索引、状态库与恢复点
+.data/
+**/.data/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.checkpoint
+checkpoint.json
+.checkpoint.json.tmp
+*.staging/
+
+# 本地 Docker image 传输制品
+*.tar
+*.tar.gz
+*.tgz
+
+# 语料快照是源码的一部分，继续跟踪。
+!data/*.json

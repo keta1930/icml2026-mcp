@@ -1,4 +1,4 @@
-"""测试夹具：用内存假引擎替代 Milvus + GPU，让核心去重逻辑可离线验证。"""
+"""测试夹具：用临时 SQLite 与假引擎保持核心测试完全离线。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class FakeEngine:
         self.search_calls.append(limit)
         pool = [p for p in self.papers if _matches(p, filters)]
         return [
-            SearchHit(paper=p, score=1.0 - i * 0.001)
+            SearchHit(paper=p, score=0.99 - i * 0.001)
             for i, p in enumerate(pool[:limit])
         ]
 
@@ -62,12 +62,16 @@ def _matches(paper: Paper, filters: SearchFilters) -> bool:
 def settings(tmp_path) -> Settings:
     return Settings(
         data_dir=tmp_path,
+        index_root=tmp_path / "index",
+        state_db_path=tmp_path / "runtime.sqlite3",
         default_top_k=5,
         max_top_k=20,
         depth_multiplier=2,
         max_search_depth=40,
         exhausted_after_empty_rounds=2,
         max_sessions=3,
+        max_session_rounds=100,
+        max_session_audit_records=100,
     )
 
 
