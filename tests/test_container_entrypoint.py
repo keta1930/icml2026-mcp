@@ -767,3 +767,8 @@ def test_compose_separates_app_runtime_from_build_canonical():
         "icml-mcp-tls"
     ]
     assert tls["ports"] == ["${ICML_PAPERS_PUBLIC_PORT:-20441}:20441/tcp"]
+    assert tls["read_only"] is True
+    assert set(tls["tmpfs"]) == {
+        "/tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777",
+        "/var/cache/nginx:rw,noexec,nosuid,nodev,size=8m,mode=0755",
+    }

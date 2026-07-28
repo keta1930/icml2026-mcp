@@ -160,6 +160,7 @@ services:
           create_host_path: false
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=8m,mode=0755
     networks:
       - backend
     restart: unless-stopped
