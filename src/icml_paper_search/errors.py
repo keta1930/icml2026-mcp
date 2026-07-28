@@ -71,6 +71,13 @@ class EmbeddingRateLimited(EmbeddingUnavailable):
     """表示 provider 返回可重试的限流。"""
 
 
+class EmbeddingQuotaExhausted(EmbeddingUnavailable):
+    """表示 provider 账户额度已耗尽且继续重试无效。"""
+    code = "embedding_quota_exhausted"
+    public_message = "文本向量服务额度已耗尽，请检查 DashScope 额度或付费设置。"
+    retryable = False
+
+
 class EmbeddingConfigurationError(EmbeddingUnavailable):
     """表示服务端 embedding secret 或地域配置缺失。"""
     public_message = "文本向量服务尚未配置。"

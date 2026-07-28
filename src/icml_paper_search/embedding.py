@@ -16,11 +16,19 @@ from .config import Settings, get_settings
 from .errors import (
     EmbeddingConfigurationError,
     EmbeddingProtocolError,
+    EmbeddingQuotaExhausted,
     EmbeddingRateLimited,
     EmbeddingUnavailable,
 )
 
 logger = logging.getLogger(__name__)
+
+_QUOTA_EXHAUSTED_RESPONSES = frozenset(
+    {
+        (HTTPStatus.BAD_REQUEST, "Arrearage"),
+        (HTTPStatus.FORBIDDEN, "AllocationQuota.FreeTierOnly"),
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +151,13 @@ class DashScopeEncoder:
             status = _response_status(response)
             if status == HTTPStatus.OK:
                 return response
+            provider_code = _field(response, "code")
+            provider_error = (status, provider_code)
+            if (
+                isinstance(provider_code, str)
+                and provider_error in _QUOTA_EXHAUSTED_RESPONSES
+            ):
+                raise EmbeddingQuotaExhausted()
             if status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
                 raise EmbeddingConfigurationError()
             if status == HTTPStatus.TOO_MANY_REQUESTS:

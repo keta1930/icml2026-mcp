@@ -5,6 +5,7 @@ from __future__ import annotations
 from icml_paper_search.errors import (
     BudgetExhausted,
     EmbeddingConfigurationError,
+    EmbeddingQuotaExhausted,
     SessionNotFoundError,
     public_error_text,
 )
@@ -23,6 +24,16 @@ def test_unknown_error_does_not_expose_message():
 
     assert "internal_error" in text
     assert sentinel not in text
+
+
+def test_embedding_quota_error_has_stable_actionable_contract():
+    error = EmbeddingQuotaExhausted()
+
+    assert error.retryable is False
+    assert public_error_text(error) == (
+        "error[embedding_quota_exhausted]: "
+        "文本向量服务额度已耗尽，请检查 DashScope 额度或付费设置。"
+    )
 
 
 def test_sensitive_identifiers_are_not_echoed():

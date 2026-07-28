@@ -204,7 +204,7 @@ uv run icml-papers search --session
 
 新建 session 的来源限流会在写入 session 前执行，不能通过耗尽全局 session 容量绕过。在线 query embedding 会按 UTF-8 byte 数加 16 Token 固定余量，在调用 provider 前同时预留日/月额度；请求明确未发送时释放预留，请求可能已发送但 usage 未知时按预留值计费。若实际 usage 超过预留，差额会持久记录，当前 UTC 日和月的后续在线调用都会 fail closed。
 
-超出边界时工具返回稳定的 `rate_limited`、`server_busy`、`budget_exhausted` 等错误码。共享 NAT 下的调用方会共用 IP 配额。公共服务的限制可能随运行成本调整；需要稳定额度时请自托管。
+超出边界时工具返回稳定的 `rate_limited`、`server_busy`、`budget_exhausted` 等错误码。DashScope 明确报告免费额度或账户余额耗尽时返回不可重试的 `embedding_quota_exhausted`；自托管管理员应检查 DashScope 额度、实名认证和“免费额度用完即停”设置，而不是反复重试。共享 NAT 下的调用方会共用 IP 配额。公共服务的限制可能随运行成本调整；需要稳定额度时请自托管。
 
 Chroma 本地持久化目录只应由一个应用进程打开。不要通过多个 worker 或多个容器共享同一目录来扩容；更高吞吐或多节点需求应迁移到支持服务端并发的向量数据库。
 

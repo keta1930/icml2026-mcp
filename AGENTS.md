@@ -55,6 +55,7 @@ src/icml_paper_search/
 
 - `qwen3.7-text-embedding` 固定使用 DashScope 北京地域 native API、1024 维 dense 输出。query 必须传 `text_type=query`，论文必须传 `text_type=document`，单批不得超过 20 条。
 - provider 响应必须校验 status、数量、`text_index` 顺序、维度、有限数值和 `total_tokens`。只重试临时网络、429、408 和 5xx；重试受总 deadline 和次数限制。
+- provider 错误分类只允许读取精确 allowlist 的 status/code；403 `AllocationQuota.FreeTierOnly` 和 400 `Arrearage` 必须首轮映射为不可重试的 `embedding_quota_exhausted`。401/普通 403 仍是配置错误，429 与 5xx 仍按瞬态故障处理；禁止记录 provider message/body、key、输入或 vector。
 - key 统一通过 `Settings.resolve_dashscope_api_key()` 解析，secret 文件优先。禁止在代码、测试、镜像、文档、日志、异常字符串或命令行参数中写入真实 key。
 - 在线 query embedding 必须经过持久 cache、single-flight、Token 预算预留/结算和 provider semaphore。调用前按 UTF-8 byte 数加固定协议开销保守预留；cache key 不得包含原始 query，只有成功向量可以缓存。
 - 限流、日/月预算和缓存状态必须持久化；重启不能重置公共服务边界。请求明确未发送时释放预留，可能已发送但 usage 未知时按预留值结算；actual 超过 reserved 时持久记录 overrun，并使当日及当月后续调用 fail closed。
