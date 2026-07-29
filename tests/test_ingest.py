@@ -143,9 +143,9 @@ class FakeMilvus:
         rows = self.collections[name]["rows"]
         return [rows[paper_id] for paper_id in ids if paper_id in rows]
 
-    def hybrid_search(self, name, requests, ranker, limit, **_):
-        self.hybrid_calls.append((requests, ranker))
-        row = next(iter(self.collections[name]["rows"].values()))
+    def hybrid_search(self, collection_name, reqs, ranker, limit, **_):
+        self.hybrid_calls.append((reqs, ranker))
+        row = next(iter(self.collections[collection_name]["rows"].values()))
         return [[{"distance": 2 / 61, "entity": row}]][:limit]
 
 

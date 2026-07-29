@@ -25,6 +25,7 @@ from ..embeddings.dashscope import DashScopeEncoder, EmbeddingBatch, TextEncoder
 from ..milvus.schema import (
     DENSE_FIELD,
     PAPER_OUTPUT_FIELDS,
+    RRF_K,
     SPARSE_FIELD,
     collection_name,
     create_collection,
@@ -324,23 +325,23 @@ def _verify_collection(
         raise IndexUnavailable()
     requests = [
         AnnSearchRequest(
-            [sample[0][DENSE_FIELD]],
-            DENSE_FIELD,
-            {"metric_type": "COSINE", "params": {}},
+            data=[sample[0][DENSE_FIELD]],
+            anns_field=DENSE_FIELD,
+            param={"metric_type": "COSINE", "params": {}},
             limit=1,
         ),
         AnnSearchRequest(
-            [records[0].title],
-            SPARSE_FIELD,
-            {"metric_type": "BM25", "params": {}},
+            data=[records[0].title],
+            anns_field=SPARSE_FIELD,
+            param={"metric_type": "BM25", "params": {}},
             limit=1,
         ),
     ]
     result = client.hybrid_search(
-        plan.collection_name,
-        requests,
-        RRFRanker(),
-        1,
+        collection_name=plan.collection_name,
+        reqs=requests,
+        ranker=RRFRanker(RRF_K),
+        limit=1,
         output_fields=list(PAPER_OUTPUT_FIELDS),
         timeout=timeout,
     )

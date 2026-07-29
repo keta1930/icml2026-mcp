@@ -77,36 +77,36 @@ class MilvusPaperRepository:
             request_options["expr"] = expression
         requests = [
             AnnSearchRequest(
-                [vector],
-                DENSE_FIELD,
-                {"metric_type": "COSINE", "params": {}},
+                data=[vector],
+                anns_field=DENSE_FIELD,
+                param={"metric_type": "COSINE", "params": {}},
                 **request_options,
             ),
             AnnSearchRequest(
-                [query],
-                SPARSE_FIELD,
-                {"metric_type": "BM25", "params": {}},
+                data=[query],
+                anns_field=SPARSE_FIELD,
+                param={"metric_type": "BM25", "params": {}},
                 **request_options,
             ),
         ]
+        ranker = RRFRanker(RRF_K)
         try:
             with self._search_limit:
                 result = self._client().hybrid_search(
-                    manifest.collection_name,
-                    requests,
-                    RRFRanker(),
-                    limit,
+                    collection_name=manifest.collection_name,
+                    reqs=requests,
+                    ranker=ranker,
+                    limit=limit,
                     output_fields=list(PAPER_OUTPUT_FIELDS),
                     timeout=self._settings.milvus_timeout_seconds,
                 )
         except Exception as exc:
             raise IndexUnavailable() from exc
         hits = result[0] if result else []
-        maximum = 2.0 / (RRF_K + 1)
         parsed: list[SearchHit] = []
         for hit in hits:
             entity = _hit_entity(hit)
-            score = min(1.0, max(0.0, _hit_score(hit) / maximum))
+            score = _normalize_rrf_score(_hit_score(hit), path_count=len(requests))
             parsed.append(SearchHit(Paper.from_mapping(entity), score))
         return parsed
 
@@ -194,3 +194,11 @@ def _hit_score(hit: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise IndexUnavailable()
     return float(value)
+
+
+def _normalize_rrf_score(score: float, *, path_count: int) -> float:
+    """Scale the theoretical RRF maximum for the configured retrieval paths."""
+    if path_count < 1:
+        raise ValueError("path_count must be positive")
+    maximum = path_count / (RRF_K + 1)
+    return min(1.0, max(0.0, score / maximum))

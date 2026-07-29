@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from icml_paper_search.config import Settings
 from icml_paper_search.domain.models import SearchFilters
 from icml_paper_search.indexing.manifest import IndexManifest
 from icml_paper_search.milvus.repository import (
     MilvusPaperRepository,
     _filter_expression,
+    _normalize_rrf_score,
 )
 
 
@@ -69,8 +72,8 @@ class FakeClient:
         self.get_calls = []
         self.closed = False
 
-    def hybrid_search(self, collection, requests, ranker, limit, **kwargs):
-        self.hybrid_calls.append((collection, requests, ranker, limit, kwargs))
+    def hybrid_search(self, collection_name, reqs, ranker, limit, **kwargs):
+        self.hybrid_calls.append((collection_name, reqs, ranker, limit, kwargs))
         return [
             [
                 {"distance": 2 / 61, "entity": _entity("p1", "First")},
@@ -140,6 +143,15 @@ def test_filter_expression_uses_exact_current_fields():
     assert _filter_expression(SearchFilters()) == ""
     assert _filter_expression(SearchFilters(area="Theory")) == 'area == "Theory"'
     assert _filter_expression(SearchFilters(spotlight_only=True)) == "spotlight == true"
+
+
+def test_rrf_score_normalization_uses_the_actual_search_path_count():
+    assert _normalize_rrf_score(2 / 61, path_count=2) == 1.0
+    assert _normalize_rrf_score(3 / 61, path_count=3) == 1.0
+    assert _normalize_rrf_score(1 / 61, path_count=2) == 0.5
+    assert _normalize_rrf_score(-1.0, path_count=2) == 0.0
+    with pytest.raises(ValueError, match="path_count must be positive"):
+        _normalize_rrf_score(0.0, path_count=0)
 
 
 def test_close_closes_encoder_and_thread_clients(tmp_path):
