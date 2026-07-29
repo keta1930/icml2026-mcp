@@ -50,7 +50,7 @@ export default async function HomePage({ params }: PageProps) {
 
         <div className="relative mx-auto mt-16 max-w-6xl overflow-hidden rounded-3xl border border-white/10 bg-[#071629] shadow-2xl shadow-cyan-950/30">
           <Image
-            src={`${siteConfig.basePath}/images/vintage-paper-search-cover.png`}
+            src={`${siteConfig.basePath}/images/vintage-paper-search-cover.webp`}
             alt={copy.imageAlt}
             width={1672}
             height={941}
