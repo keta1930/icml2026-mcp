@@ -1,21 +1,17 @@
 ---
 title: HTTP and Health Checks
-description: Streamable HTTP MCP, liveness, readiness, and response semantics.
+description: MCP, liveness, and readiness endpoints.
 ---
-
-One ASGI application exposes MCP and two regular HTTP health routes.
 
 | Path | Method | Purpose |
 |---|---|---|
 | `/mcp` | MCP transport | Streamable HTTP initialization, tools/list, and tools/call |
 | `/health/live` | GET | Process liveness |
-| `/health/ready` | GET | Local state/index service readiness |
+| `/health/ready` | GET | SQLite, manifest, and Milvus readiness |
 
-## `/mcp` content negotiation
+## Why a browser gets HTTP 406
 
-An ordinary browser GET or JSON-only GET to `/mcp` receives HTTP 406 with `Client must accept text/event-stream`. This is expected Streamable HTTP behavior, not a failed health check.
-
-An MCP client establishes transport with POST `initialize` and `Accept: application/json, text/event-stream`. The returned `Mcp-Session-Id` identifies the transport session and is unrelated to the business capability returned by `open_search_session`.
+`/mcp` is a Streamable HTTP protocol endpoint, not a web page. A browser GET normally returns HTTP 406 with `Client must accept text/event-stream`. Use an MCP client to connect and the health routes below for manual checks.
 
 ## Liveness
 
@@ -23,7 +19,7 @@ An MCP client establishes transport with POST `initialize` and `Accept: applicat
 curl -fsS http://127.0.0.1:20441/health/live
 ```
 
-Success returns HTTP 200 with `{"status":"ok"}`. It does not inspect the index, SQLite, provider, or key.
+HTTP 200 with `{"status":"ok"}` means the process is alive.
 
 ## Readiness
 
@@ -31,14 +27,4 @@ Success returns HTTP 200 with `{"status":"ok"}`. It does not inspect the index, 
 curl -fsS http://127.0.0.1:20441/health/ready
 ```
 
-Ready returns HTTP 200 with `{"status":"ready"}`; failure returns HTTP 503 with `{"status":"not_ready"}`.
-
-Readiness validates runtime SQLite, source corpus, the current manifest, Chroma collection/IDs/dimension, and FTS5 consistency. It neither reads the DashScope key nor contacts the provider.
-
-## Monitoring guidance
-
-- Process managers use liveness for restart decisions.
-- Traffic entrypoints use readiness before admitting service traffic.
-- A transient provider problem must not mark the local index unready.
-- Allow enough container `start_period` for runtime-index copy and complete validation.
-- A public proxy probe must send an allowed Host or DNS rebinding protection will reject it.
+HTTP 200 with `{"status":"ready"}` means SQLite, the manifest, the corpus snapshot, and the Milvus collection agree. HTTP 503 means they are not ready. This check does not call DashScope.

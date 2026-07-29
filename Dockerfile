@@ -25,7 +25,7 @@ FROM ${PYTHON_IMAGE} AS runtime
 ARG VCS_REF=unknown
 
 LABEL org.opencontainers.image.title="ICML 2026 Paper Search MCP" \
-      org.opencontainers.image.description="Single-process Chroma and DashScope MCP service" \
+      org.opencontainers.image.description="Milvus and DashScope MCP paper-search service" \
       org.opencontainers.image.revision="${VCS_REF}"
 
 ENV HOME=/tmp \

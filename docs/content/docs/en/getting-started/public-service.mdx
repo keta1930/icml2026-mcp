@@ -1,24 +1,22 @@
 ---
-title: Connect to the Public Service
-description: Register the public ICML MCP without a DashScope key and run your first search.
+title: Public service
+description: Connect an MCP client to the shared instance.
 ---
 
-The public instance is intended for quick tool validation and lightweight research. Clients do not provide a DashScope key.
+Endpoint:
 
-## Register with Claude Code
+```text
+https://icml.agent4sci.com:20441/mcp
+```
+
+Claude Code:
 
 ```bash
 claude mcp add --transport http icml-papers --scope user \
   https://icml.agent4sci.com:20441/mcp
 ```
 
-Confirm the registration:
-
-```bash
-claude mcp list
-```
-
-Other compatible MCP clients can use:
+Generic Streamable HTTP configuration:
 
 ```json
 {
@@ -31,44 +29,4 @@ Other compatible MCP clients can use:
 }
 ```
 
-## Why a browser receives 406 from `/mcp`
-
-`/mcp` is an MCP Streamable HTTP protocol endpoint, not a web page or a conventional REST JSON API. A browser-address-bar GET normally omits `Accept: text/event-stream`, so the SDK returns HTTP 406 with `Client must accept text/event-stream`. This is expected content negotiation, not evidence that the service is down.
-
-Use an MCP client with Streamable HTTP support. Its SDK performs POST `initialize`, sends `Accept: application/json, text/event-stream`, manages the transport session, and issues subsequent requests. For manual checks, use:
-
-```text
-https://icml.agent4sci.com:20441/health/live
-https://icml.agent4sci.com:20441/health/ready
-```
-
-## First call
-
-Ask the client to call:
-
-```text
-search_papers(query="discrete diffusion language models", top_k=5)
-```
-
-That search is stateless. To vary the query without repeating papers, open a session first:
-
-```text
-open_search_session(label="diffusion LM", default_top_k=5)
-search_papers(query="masked diffusion text", session_id="...")
-```
-
-## Public-instance boundaries
-
-- The service is anonymous, shared, and has no SLA.
-- Each source IP and the global service have rate, daily-budget, and queue limits.
-- Multiple users behind shared NAT consume the same IP quota.
-- A `session_id` is a bearer capability; do not publish, log, or commit it.
-- Queries and session labels must not contain secrets, personal data, or unpublished material.
-- The response-header `Mcp-Session-Id` identifies the transport session. The value returned by `open_search_session` is a business capability session for paper deduplication. Do not interchange them.
-
-Back off after `rate_limited` or `server_busy`. Retrying `budget_exhausted` or `embedding_quota_exhausted` immediately will not restore service. See the [error reference](/en/docs/reference/errors).
-
-## Next steps
-
-- Complete [your first research session](/en/docs/getting-started/first-session).
-- Move to [local deployment](/en/docs/getting-started/local-deployment) when you need controlled capacity.
+The quota is shared and the service may be unavailable during maintenance. Use a local deployment when you need an independent service or data store.

@@ -1,48 +1,34 @@
 ---
 title: Configuration
-description: ICML_PAPERS_ environment variables, defaults, combined constraints, and secret precedence.
+description: ICML_PAPERS_ environment variables and defaults.
 ---
 
-Runtime configuration lives in `Settings`. A root `.env` overrides defaults, and every environment variable uses the `ICML_PAPERS_` prefix.
+Copy `.env.example` to `.env` for local use. Explicit environment variables override `.env`; all names use the `ICML_PAPERS_` prefix.
 
 ## Secret
 
-Set either a direct key or a file:
+Set the key directly or through a file:
 
 ```dotenv
 ICML_PAPERS_DASHSCOPE_API_KEY=
 ICML_PAPERS_DASHSCOPE_API_KEY_FILE=/run/secrets/dashscope_api_key
 ```
 
-The file takes precedence. For public or container deployment, prefer a read-only secret file. Keep keys out of images, Git, logs, exceptions, and command arguments.
-
-## Combined constraints
-
-- Dense and BM25 weights must sum to 1.
-- `qwen3.7-text-embedding` uses 1,024 dimensions.
-- Embedding batch size cannot exceed 20.
-- The monthly Token budget cannot be smaller than the daily budget.
-- `max_search_depth` cannot be smaller than `max_top_k`.
-- Burst cannot exceed the corresponding per-minute rate.
-- Trusted proxy mode requires at least one trusted network.
-- The DashScope base URL must be the Beijing-region HTTPS native API.
-- Allowed hosts and origins accept exact values, or `:*` only in the port position.
-
-Pydantic rejects invalid combinations before process startup.
+The file takes precedence. Public deployments should use a read-only secret file. Invalid values or inconsistent combinations stop the process before startup.
 
 ## JSON environment values
 
-Use JSON for tuple/list settings:
+Use JSON arrays for list settings:
 
 ```dotenv
 ICML_PAPERS_ALLOWED_HOSTS=["papers.example.com:443"]
 ICML_PAPERS_TRUSTED_PROXY_NETWORKS=["172.20.0.0/16"]
 ```
 
-Production settings must use actual Host, Origin, and proxy networks rather than copied example domains or broad private ranges.
+Use the exact public Host, Origin, and proxy network in production.
 
-## Generated field table
+## Fields
 
-The table comes from `Settings.model_json_schema()`. See root `.env.example` for grouped comments.
+This table is generated from the runtime settings schema.
 
 <include>../../../../generated/en/configuration.mdx</include>

@@ -1,20 +1,20 @@
 [project]
 name = "icml-paper-search-mcp"
-version = "0.1.0"
+version = "0.3.0"
 description = "MCP server for deduplicated hybrid search over the ICML 2026 paper corpus"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "chromadb>=1.0.0,<2",
     "dashscope>=1.24.0,<2",
     "mcp>=1.26.0",
+    "pymilvus==2.5.18",
     "pydantic>=2.11",
     "pydantic-settings>=2.12",
 ]
 
 [project.scripts]
-icml-paper-search-mcp = "icml_paper_search.server:main"
+icml-paper-search-mcp = "icml_paper_search.transport.mcp:main"
 icml-papers = "icml_paper_search.cli:main"
 
 [dependency-groups]
@@ -22,6 +22,7 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.0.0",
+    "ruff==0.16.0",
 ]
 
 [build-system]

@@ -6,7 +6,7 @@ import asyncio
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,28 +16,27 @@ from starlette.requests import Request
 from starlette.testclient import TestClient
 
 from icml_paper_search.config import Settings
-from icml_paper_search.governance import ThreadLimiters
-from icml_paper_search.models import (
+from icml_paper_search.domain.models import (
     Paper,
     SearchFilters,
     SearchHit,
     SearchOutcome,
     SessionSummary,
 )
-from icml_paper_search.server import (
+from icml_paper_search.runtime.database import RuntimeDatabase
+from icml_paper_search.runtime.concurrency import ThreadLimiters
+from icml_paper_search.runtime.sessions import SessionManager, SQLiteSessionStore
+from icml_paper_search.search.service import PaperSearchService
+from icml_paper_search.transport.mcp import _transport_security, create_mcp
+from icml_paper_search.transport.resources import ApplicationResources
+from icml_paper_search.transport.tools import (
     INSTRUCTIONS,
-    ApplicationResources,
     _resolve_client_ip,
     _safe_tool_call,
-    _transport_security,
-    create_mcp,
     open_search_session,
     search_papers,
     search_session_status,
 )
-from icml_paper_search.service import PaperSearchService
-from icml_paper_search.sessions import SessionManager, SQLiteSessionStore
-from icml_paper_search.state import RuntimeDatabase
 
 
 def _settings(tmp_path, **overrides) -> Settings:
@@ -179,24 +178,6 @@ def _list_tools(client: TestClient, session_id: str, request_id: int) -> None:
     assert "search_papers" in response.text
 
 
-def _call_status_without_capability(
-    client: TestClient, session_id: str, request_id: int
-) -> None:
-    """Call a real MCP tool that reads process resources without provider access."""
-    response = client.post(
-        "/mcp",
-        headers={**_MCP_HEADERS, "mcp-session-id": session_id},
-        json={
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "tools/call",
-            "params": {"name": "search_session_status", "arguments": {}},
-        },
-    )
-    assert response.status_code == 200
-    assert "error[invalid_request]" in response.text
-
-
 def _close_transport(client: TestClient, session_id: str) -> None:
     """Terminate a real Streamable HTTP transport."""
     response = client.delete(
@@ -218,50 +199,50 @@ def test_six_tools_are_async_and_context_is_not_in_schema(tmp_path):
         "list_paper_areas",
     }
     assert all(tool.is_async for tool in tools.values())
-    assert all("ctx" not in tool.parameters.get("properties", {}) for tool in tools.values())
+    assert all(
+        "ctx" not in tool.parameters.get("properties", {}) for tool in tools.values()
+    )
     assert tools["search_papers"].parameters["properties"]["query"]["maxLength"] == 2000
     assert tools["get_papers"].parameters["properties"]["paper_ids"]["maxItems"] == 50
 
 
 def test_initialize_and_tool_schema_match_the_english_contract(tmp_path):
     expected_instructions = (
-        "Hybrid search over 6,341 ICML 2026 papers using Chroma dense retrieval and "
-        "SQLite BM25.\nFor multi-round research, create a capability session, keep its "
-        "`session_id` private, and\nreuse it across `search_papers` calls so previously "
-        "returned papers are suppressed.\nConsecutive empty rounds indicate that the "
-        "current direction may be exhausted; rephrase\nthe query, increase `search_depth`, "
-        "or close the session. Without a `session_id`, searches\nare stateless. Anonymous "
-        "callers cannot enumerate other sessions."
+        "Search a fixed collection of 6,341 ICML 2026 papers.\nFor multi-round research, "
+        "call `open_search_session`, keep its `session_id` private, and\nreuse it in later "
+        "`search_papers` calls. Papers already returned in that session will be\nleft out. "
+        "Searches without a `session_id` are stateless, and different sessions remain\n"
+        "independent. If several searches return no new papers, rephrase the query, change "
+        "filters,\nor close the session."
     )
     expected_tools = [
         (
             "open_search_session",
             "Open Search Session",
-            "Create an unenumerable capability session for automatic deduplication "
-            "across search rounds.",
+            "Start a search session and return its ID. Pass that ID to later search "
+            "calls to leave out papers already returned in the session.",
         ),
         (
             "search_papers",
             "Search Papers",
-            "Search ICML 2026 papers with Chroma dense retrieval and SQLite BM25 weighted "
-            "RRF; with `session_id`, return only papers not yet seen in that session.",
+            "Search 6,341 ICML 2026 papers. With `session_id`, leave out papers already "
+            "returned in that session.",
         ),
         (
             "close_search_session",
             "Close Search Session",
-            "Close a capability session and return a bounded search summary.",
+            "Close a search session and return a short summary.",
         ),
         (
             "search_session_status",
             "Search Session Status",
-            "Inspect one capability session by `session_id`; anonymous callers cannot "
-            "enumerate sessions.",
+            "Show progress for one search session.",
         ),
         (
             "get_papers",
             "Get Papers",
-            "Fetch full abstracts by OpenReview ID and optionally mark the papers as seen "
-            "in a capability session atomically.",
+            "Fetch papers by OpenReview ID. With `session_id`, record found papers as "
+            "returned in that session.",
         ),
         (
             "list_paper_areas",
@@ -276,25 +257,25 @@ def test_initialize_and_tool_schema_match_the_english_contract(tmp_path):
         },
         "search_papers": {
             "query": "Natural-language research topic or method.",
-            "session_id": "Capability session ID used for persistent deduplication.",
+            "session_id": "Search session ID used to leave out previously returned papers.",
             "top_k": "Maximum number of new papers to return.",
-            "search_depth": "Fixed relevance-window depth.",
+            "search_depth": (
+                "Number of ranked candidates to check before session deduplication."
+            ),
             "area": "Research area filter.",
             "paper_type": "Paper type filter.",
             "spotlight_only": "Return only spotlight papers.",
-            "min_score": "Minimum normalized weighted-RRF score.",
+            "min_score": "Minimum normalized hybrid-ranking score.",
             "include_abstract": "Include abstract previews in the result.",
         },
-        "close_search_session": {"session_id": "Capability session ID to close."},
+        "close_search_session": {"session_id": "Search session ID to close."},
         "search_session_status": {
-            "session_id": "Capability session ID to inspect.",
+            "session_id": "Search session ID to inspect.",
             "include_papers": "Include a bounded list of paper titles.",
         },
         "get_papers": {
             "paper_ids": "OpenReview paper IDs.",
-            "session_id": (
-                "Capability session in which returned papers are atomically marked as seen."
-            ),
+            "session_id": "Search session in which found papers are recorded as returned.",
         },
         "list_paper_areas": {},
     }
@@ -303,13 +284,17 @@ def test_initialize_and_tool_schema_match_the_english_contract(tmp_path):
     tools = server._tool_manager.list_tools()
 
     assert INSTRUCTIONS == expected_instructions
-    assert [(tool.name, tool.title, tool.description) for tool in tools] == expected_tools
+    assert [
+        (tool.name, tool.title, tool.description) for tool in tools
+    ] == expected_tools
     for tool in tools:
         properties = tool.parameters.get("properties", {})
         assert {
             name: schema["description"] for name, schema in properties.items()
         } == expected_descriptions[tool.name]
-        assert not re.search(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", tool.description)
+        assert not re.search(
+            r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", tool.description
+        )
 
     by_name = {tool.name: tool.parameters for tool in tools}
     assert by_name["open_search_session"].get("required", []) == []
@@ -347,9 +332,14 @@ def test_initialize_and_tool_schema_match_the_english_contract(tmp_path):
     assert search_schema["properties"]["include_abstract"]["default"] is True
     assert by_name["close_search_session"]["required"] == ["session_id"]
     assert by_name["close_search_session"]["properties"]["session_id"]["minLength"] == 1
-    assert by_name["search_session_status"].get("required", []) == []
-    assert by_name["search_session_status"]["properties"]["session_id"]["default"] is None
-    assert by_name["search_session_status"]["properties"]["include_papers"]["default"] is False
+    assert by_name["search_session_status"]["required"] == ["session_id"]
+    assert (
+        by_name["search_session_status"]["properties"]["session_id"]["minLength"] == 1
+    )
+    assert (
+        by_name["search_session_status"]["properties"]["include_papers"]["default"]
+        is False
+    )
     assert by_name["get_papers"]["required"] == ["paper_ids"]
     assert by_name["get_papers"]["properties"]["paper_ids"]["minItems"] == 1
     assert by_name["get_papers"]["properties"]["paper_ids"]["maxItems"] == 50
@@ -408,7 +398,7 @@ def test_two_transports_do_not_own_shared_application_resources(tmp_path):
         assert resources.initialize_calls == 1
         assert resources.close_calls == 0
         assert client.get("/health/ready").status_code == 200
-        _call_status_without_capability(client, second, 5)
+        _list_tools(client, second, 5)
         _close_transport(client, second)
         assert client.get("/health/ready").status_code == 200
 
@@ -420,11 +410,11 @@ def test_asgi_startup_failure_fails_closed(tmp_path):
     resources = LifecycleResources(_settings(tmp_path), fail_initialize=True)
     server = create_mcp(resources.settings, resources=resources)
 
-    with pytest.raises(RuntimeError, match="startup failed"):
-        with TestClient(
-            server.streamable_http_app(), base_url="http://127.0.0.1:20441"
-        ):
-            pytest.fail("the service context must not open after startup failure")
+    with (
+        pytest.raises(RuntimeError, match="startup failed"),
+        TestClient(server.streamable_http_app(), base_url="http://127.0.0.1:20441"),
+    ):
+        pytest.fail("the service context must not open after startup failure")
 
     assert resources.initialize_calls == 1
     assert resources.close_calls == 0
@@ -458,15 +448,16 @@ def test_partial_startup_failure_closes_owned_resources(tmp_path):
     """Clean partial real-resource startup once without starting the session manager."""
     database = FailingDatabase()
     resources = ApplicationResources(
-        _settings(tmp_path), database=database  # type: ignore[arg-type]
+        _settings(tmp_path),
+        database=database,  # type: ignore[arg-type]
     )
     server = create_mcp(resources.settings, resources=resources)
 
-    with pytest.raises(RuntimeError, match="state startup failed"):
-        with TestClient(
-            server.streamable_http_app(), base_url="http://127.0.0.1:20441"
-        ):
-            pytest.fail("the service context must not open after state startup failure")
+    with (
+        pytest.raises(RuntimeError, match="state startup failed"),
+        TestClient(server.streamable_http_app(), base_url="http://127.0.0.1:20441"),
+    ):
+        pytest.fail("the service context must not open after state startup failure")
 
     assert database.initialize_calls == 1
     assert database.close_calls == 1
@@ -537,7 +528,7 @@ class SlowService:
         )
 
     def session_status(self, _session_id: str, *, include_papers: bool):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return SessionSummary(
             session_id="ses_test",
             label="test",
@@ -568,7 +559,7 @@ class CountingSessionService(SlowService):
         with self.lock:
             self.open_calls += 1
             ordinal = self.open_calls
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return SessionSummary(
             session_id=f"ses_test_{ordinal}",
             label=label or "untitled",
@@ -712,15 +703,11 @@ def test_40_clients_mix_search_and_status_with_same_session(tmp_path):
         database = RuntimeDatabase(settings.state_db_path)
         database.initialize()
         engine = ConcurrentEngine()
-        sessions = SessionManager(
-            settings, SQLiteSessionStore(database, settings)
-        )
+        sessions = SessionManager(settings, SQLiteSessionStore(database, settings))
         service = PaperSearchService(
             settings, engine=engine, sessions=sessions, database=database
         )
-        resources = ApplicationResources(
-            settings, database=database, service=service
-        )
+        resources = ApplicationResources(settings, database=database, service=service)
         resources.initialize()
         session_id = service.open_session(label="shared").session_id
         try:

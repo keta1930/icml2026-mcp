@@ -1,47 +1,12 @@
 ---
-title: Backup and Restore
-description: Cold-back up the canonical index and runtime state together, then validate recovery with readiness.
+title: Backup
+description: Data that must be preserved for a self-hosted instance.
 ---
 
-Back up the authoritative index and runtime state as one cold snapshot. Chroma and SQLite may have active files, so stop the MCP application before copying.
+Back up these Docker volumes:
 
-## Authoritative data
+- `etcd-data`, `minio-data`, and `milvus-data` for the Milvus collection;
+- `icml-index` for `current.json` and build checkpoints;
+- `icml-state` for sessions, limits, and the embedding cache.
 
-| Data | Back up? |
-|---|---:|
-| `.data/index` / canonical-index mount | Yes |
-| `.data/state/runtime.sqlite3` with WAL/SHM | Yes |
-| `state/runtime-index` | No; regenerate from canonical `current` |
-| Container tmpfs secret | No; restore from the secret manager |
-
-## Local cold backup
-
-After stopping the service:
-
-```bash
-tar -C .data --exclude='state/runtime-index' \
-  -czf icml-paper-search-backup.tgz index state
-```
-
-Record the application version, backup time, and current build ID. Do not back up only Chroma or copy only the main SQLite file while omitting WAL.
-
-## Restore
-
-1. Keep the application stopped.
-2. Restore the original directory layout and permissions.
-3. Restore the application version and configuration that match the index.
-4. Run local validation before starting service.
-
-```bash
-uv run icml-papers info
-uv run icml-paper-search-mcp
-curl -fsS http://127.0.0.1:20441/health/ready
-```
-
-Readiness rejects a mismatch in model, dimension, corpus hash, paper-ID fingerprint, or fusion settings. Never disable validation to bypass a restoration error.
-
-## Container restore
-
-Restore the canonical-index and state bind mounts together, excluding derived `runtime-index`. At startup, the entrypoint rebuilds the copy from canonical `current` and runs full zero-cloud validation.
-
-Practice restoration in an isolated environment. An untested backup is not a verified recovery point.
+Stop the MCP application before backing up `icml-state`. For a consistent Milvus backup, stop Milvus, etcd, and MinIO together or use a Milvus-supported backup procedure. Restore all three Milvus volumes as one set, then restore the manifest and runtime-state volumes.

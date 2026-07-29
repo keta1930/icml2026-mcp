@@ -1,17 +1,18 @@
-"""Orchestrate local hybrid retrieval and SQLite capability sessions."""
+"""Orchestrate Milvus hybrid retrieval and SQLite capability sessions."""
 
 from __future__ import annotations
 
 import logging
 
-from .config import Settings, get_settings
-from .embedding import DashScopeEncoder
-from .errors import InvalidRequestError
-from .governance import EmbeddingCache, GovernedQueryEncoder, SQLiteBudgetLedger
-from .models import Paper, SearchFilters, SearchOutcome, SessionSummary
-from .retrieval import ChromaHybridSearchEngine, SearchEngine
-from .sessions import SessionManager, SQLiteSessionStore
-from .state import RuntimeDatabase, hash_query
+from ..config import Settings, get_settings
+from ..domain.errors import InvalidRequestError
+from ..domain.models import Paper, SearchFilters, SearchOutcome, SessionSummary
+from ..embeddings.dashscope import DashScopeEncoder
+from ..milvus.repository import MilvusPaperRepository, SearchEngine
+from ..runtime.database import RuntimeDatabase, hash_query
+from ..runtime.embedding_cache import EmbeddingCache, GovernedQueryEncoder
+from ..runtime.provider_quota import SQLiteProviderQuota
+from ..runtime.sessions import SessionManager, SQLiteSessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,13 @@ class PaperSearchService:
         self._settings = settings or get_settings()
         self._database = database
         self._owns_database = False
-        if sessions is None or engine is None:
-            if self._database is None:
-                self._database = RuntimeDatabase(
-                    self._settings.state_db_path,
-                    busy_timeout_ms=self._settings.sqlite_busy_timeout_ms,
-                )
-                self._database.initialize()
-                self._owns_database = True
+        if (sessions is None or engine is None) and self._database is None:
+            self._database = RuntimeDatabase(
+                self._settings.state_db_path,
+                busy_timeout_ms=self._settings.sqlite_busy_timeout_ms,
+            )
+            self._database.initialize()
+            self._owns_database = True
         if sessions is None:
             assert self._database is not None
             sessions = SessionManager(
@@ -49,10 +49,10 @@ class PaperSearchService:
             governed_encoder = GovernedQueryEncoder(
                 provider,
                 EmbeddingCache(self._database, self._settings),
-                SQLiteBudgetLedger(self._database, self._settings),
+                SQLiteProviderQuota(self._database, self._settings),
                 self._settings,
             )
-            engine = ChromaHybridSearchEngine(self._settings, governed_encoder)
+            engine = MilvusPaperRepository(self._settings, governed_encoder)
         self._engine = engine
         self._sessions = sessions
 
@@ -60,11 +60,7 @@ class PaperSearchService:
         self, label: str = "", default_top_k: int | None = None
     ) -> SessionSummary:
         """Create a search session with capability-based automatic deduplication."""
-        top_k = (
-            self._clamp_top_k(default_top_k)
-            if default_top_k is not None
-            else None
-        )
+        top_k = self._clamp_top_k(default_top_k) if default_top_k is not None else None
         return self._sessions.open(label=label, default_top_k=top_k)
 
     def close_session(self, session_id: str) -> SessionSummary:
@@ -94,7 +90,9 @@ class PaperSearchService:
         if not normalized_query:
             raise InvalidRequestError(public_message="query must not be empty.")
         if len(normalized_query) > self._settings.max_query_chars:
-            raise InvalidRequestError(public_message="query exceeds the maximum length.")
+            raise InvalidRequestError(
+                public_message="query exceeds the maximum length."
+            )
         if min_score is not None and not 0.0 <= float(min_score) <= 1.0:
             raise InvalidRequestError(public_message="min_score must be within [0,1].")
 
@@ -110,9 +108,7 @@ class PaperSearchService:
         )
         depth = self._resolve_depth(wanted, search_depth)
 
-        candidates = self._engine.search(
-            normalized_query, limit=depth, filters=filters
-        )
+        candidates = self._engine.search(normalized_query, limit=depth, filters=filters)
         if min_score is not None:
             candidates = [hit for hit in candidates if hit.score >= min_score]
         candidates_examined = len(candidates)
@@ -130,7 +126,6 @@ class PaperSearchService:
                 candidates,
                 wanted=wanted,
                 query_hash=hash_query(normalized_query),
-                query_summary=None,
                 filters_desc=filters.describe(),
                 candidates_examined=candidates_examined,
             )
@@ -173,7 +168,9 @@ class PaperSearchService:
     ) -> list[Paper]:
         """Fetch papers in input order and atomically record those that exist."""
         if len(paper_ids) > self._settings.max_get_paper_ids:
-            raise InvalidRequestError(public_message="paper_ids exceeds the maximum item count.")
+            raise InvalidRequestError(
+                public_message="paper_ids exceeds the maximum item count."
+            )
         papers = self._engine.fetch(paper_ids)
         if session_id is not None:
             self._sessions.mark_ids_seen(

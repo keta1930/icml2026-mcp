@@ -1,4 +1,4 @@
 {
   "title": "ICML Paper Search MCP",
-  "pages": ["index", "roadmap", "getting-started", "concepts", "guides", "reference", "operations"]
+  "pages": ["index", "getting-started", "concepts", "guides", "reference", "operations", "roadmap"]
 }

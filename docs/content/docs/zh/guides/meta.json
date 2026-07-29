@@ -1,4 +1,4 @@
 {
   "title": "使用指南",
-  "pages": ["research-workflow", "filters-and-scoring", "mcp-clients", "rebuild-index"]
+  "pages": ["mcp-clients", "rebuild-index"]
 }

@@ -13,38 +13,38 @@
 | `ICML_PAPERS_EMBEDDING_DIM` | `integer` | `1024` | ≥ 1 |
 | `ICML_PAPERS_EMBEDDING_BATCH_SIZE` | `integer` | `20` | ≥ 1, ≤ 20 |
 | `ICML_PAPERS_EMBEDDING_MAX_ATTEMPTS` | `integer` | `3` | ≥ 1, ≤ 5 |
-| `ICML_PAPERS_EMBEDDING_DEADLINE_SECONDS` | `number` | `12.0` | ＞ 0, ≤ 60 |
-| `ICML_PAPERS_DENSE_WEIGHT` | `number` | `0.8` | ≥ 0.0, ≤ 1.0 |
-| `ICML_PAPERS_BM25_WEIGHT` | `number` | `0.2` | ≥ 0.0, ≤ 1.0 |
-| `ICML_PAPERS_RRF_K` | `integer` | `60` | ≥ 1 |
+| `ICML_PAPERS_EMBEDDING_DEADLINE_SECONDS` | `number` | `12.0` | > 0, ≤ 60 |
+| `ICML_PAPERS_MILVUS_URI` | `string` | `http://127.0.0.1:19530` | — |
+| `ICML_PAPERS_MILVUS_COLLECTION_PREFIX` | `string` | `icml2026_mcp` | — |
+| `ICML_PAPERS_MILVUS_TIMEOUT_SECONDS` | `number` | `10.0` | > 0, ≤ 120 |
 | `ICML_PAPERS_DEFAULT_TOP_K` | `integer` | `10` | ≥ 1 |
 | `ICML_PAPERS_MAX_TOP_K` | `integer` | `50` | ≥ 1 |
 | `ICML_PAPERS_DEPTH_MULTIPLIER` | `integer` | `4` | ≥ 1 |
 | `ICML_PAPERS_MAX_SEARCH_DEPTH` | `integer` | `200` | ≥ 1 |
-| `ICML_PAPERS_MAX_QUERY_CHARS` | `integer` | `2000` | ≥ 1 |
+| `ICML_PAPERS_MAX_QUERY_CHARS` | `integer` | `4000` | ≥ 1 |
 | `ICML_PAPERS_MAX_GET_PAPER_IDS` | `integer` | `50` | ≥ 1 |
 | `ICML_PAPERS_SESSION_IDLE_TTL_SECONDS` | `integer` | `86400` | ≥ 60 |
-| `ICML_PAPERS_MAX_SESSIONS` | `integer` | `256` | ≥ 1 |
+| `ICML_PAPERS_MAX_SESSIONS` | `integer` | `4096` | ≥ 1 |
 | `ICML_PAPERS_EXHAUSTED_AFTER_EMPTY_ROUNDS` | `integer` | `3` | ≥ 1 |
 | `ICML_PAPERS_MAX_SESSION_ROUNDS` | `integer` | `200` | ≥ 1 |
 | `ICML_PAPERS_MAX_SESSION_SEEN` | `integer` | `6341` | ≥ 1 |
 | `ICML_PAPERS_MAX_SESSION_AUDIT_RECORDS` | `integer` | `200` | ≥ 0 |
 | `ICML_PAPERS_SESSION_SUMMARY_PAPER_LIMIT` | `integer` | `500` | ≥ 0 |
 | `ICML_PAPERS_SESSION_LABEL_MAX_CHARS` | `integer` | `120` | ≥ 1 |
-| `ICML_PAPERS_PROVIDER_CONCURRENCY` | `integer` | `4` | ≥ 1 |
-| `ICML_PAPERS_CHROMA_CONCURRENCY` | `integer` | `2` | ≥ 1 |
-| `ICML_PAPERS_SEARCH_QUEUE_SIZE` | `integer` | `64` | ≥ 1 |
-| `ICML_PAPERS_QUEUE_TIMEOUT_SECONDS` | `number` | `10.0` | ＞ 0 |
-| `ICML_PAPERS_IP_RATE_PER_MINUTE` | `integer` | `6` | ≥ 1 |
-| `ICML_PAPERS_IP_RATE_BURST` | `integer` | `3` | ≥ 1 |
-| `ICML_PAPERS_IP_SEARCHES_PER_DAY` | `integer` | `200` | ≥ 1 |
-| `ICML_PAPERS_IP_SESSION_OPEN_RATE_PER_MINUTE` | `integer` | `3` | ≥ 1 |
-| `ICML_PAPERS_IP_SESSION_OPEN_BURST` | `integer` | `2` | ≥ 1 |
-| `ICML_PAPERS_IP_SESSION_OPENS_PER_DAY` | `integer` | `20` | ≥ 1 |
-| `ICML_PAPERS_GLOBAL_RATE_PER_MINUTE` | `integer` | `120` | ≥ 1 |
-| `ICML_PAPERS_DAILY_TOKEN_BUDGET` | `integer` | `500000` | ≥ 1 |
-| `ICML_PAPERS_MONTHLY_TOKEN_BUDGET` | `integer` | `10000000` | ≥ 1 |
-| `ICML_PAPERS_EMBEDDING_CACHE_MAX_ENTRIES` | `integer` | `10000` | ≥ 0 |
+| `ICML_PAPERS_PROVIDER_CONCURRENCY` | `integer` | `64` | ≥ 1 |
+| `ICML_PAPERS_MILVUS_CONCURRENCY` | `integer` | `32` | ≥ 1 |
+| `ICML_PAPERS_SEARCH_QUEUE_SIZE` | `integer` | `512` | ≥ 1 |
+| `ICML_PAPERS_QUEUE_TIMEOUT_SECONDS` | `number` | `10.0` | > 0 |
+| `ICML_PAPERS_IP_RATE_PER_MINUTE` | `integer` | `600` | ≥ 1 |
+| `ICML_PAPERS_IP_RATE_BURST` | `integer` | `100` | ≥ 1 |
+| `ICML_PAPERS_IP_SEARCHES_PER_DAY` | `integer` | `50000` | ≥ 1 |
+| `ICML_PAPERS_IP_SESSION_OPEN_RATE_PER_MINUTE` | `integer` | `60` | ≥ 1 |
+| `ICML_PAPERS_IP_SESSION_OPEN_BURST` | `integer` | `20` | ≥ 1 |
+| `ICML_PAPERS_IP_SESSION_OPENS_PER_DAY` | `integer` | `5000` | ≥ 1 |
+| `ICML_PAPERS_GLOBAL_RATE_PER_MINUTE` | `integer` | `6000` | ≥ 1 |
+| `ICML_PAPERS_PROVIDER_REQUESTS_PER_MINUTE` | `integer` | `24000` | ≥ 1 |
+| `ICML_PAPERS_PROVIDER_TOKENS_PER_MINUTE` | `integer` | `1000000` | ≥ 1 |
+| `ICML_PAPERS_EMBEDDING_CACHE_MAX_ENTRIES` | `integer` | `100000` | ≥ 0 |
 | `ICML_PAPERS_EMBEDDING_CACHE_TTL_SECONDS` | `integer` | `86400` | ≥ 0 |
 | `ICML_PAPERS_ABSTRACT_PREVIEW_CHARS` | `integer` | `360` | ≥ 0 |
 | `ICML_PAPERS_MAX_AUTHORS_SHOWN` | `integer` | `4` | ≥ 0 |

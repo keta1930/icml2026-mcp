@@ -7,10 +7,9 @@ export const revalidate = false;
 
 const essential = new Set([
   "",
-  "roadmap",
   "getting-started/public-service",
   "getting-started/local-deployment",
-  "concepts/architecture",
+  "concepts/sessions",
   "reference/mcp-tools",
 ]);
 

@@ -4,28 +4,32 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Iterable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
-from .config import Settings, get_settings
-from .errors import InvalidRequestError, SessionCapacityReached, SessionNotFoundError
-from .models import QueryRecord, RoundCommit, SearchHit, SessionSummary
-from .state import RuntimeDatabase, hash_capability
+from ..config import Settings, get_settings
+from ..domain.errors import (
+    InvalidRequestError,
+    SessionCapacityReached,
+    SessionNotFoundError,
+)
+from ..domain.models import QueryRecord, RoundCommit, SearchHit, SessionSummary
+from .database import RuntimeDatabase, hash_capability
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _as_timestamp(value: datetime) -> float:
     """Convert a timezone-safe datetime to the UTC timestamp used by SQLite."""
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
     return value.timestamp()
 
 
 def _as_datetime(value: float) -> datetime:
-    return datetime.fromtimestamp(value, tz=timezone.utc)
+    return datetime.fromtimestamp(value, tz=UTC)
 
 
 @runtime_checkable
@@ -48,7 +52,6 @@ class SessionStore(Protocol):
         *,
         wanted: int,
         query_hash: str,
-        query_summary: str | None,
         filters_desc: str,
         candidates_examined: int,
         now: datetime,
@@ -85,7 +88,9 @@ class SessionStore(Protocol):
 class SQLiteSessionStore:
     """Maintain consistent session state with short `BEGIN IMMEDIATE` transactions."""
 
-    def __init__(self, database: RuntimeDatabase, settings: Settings | None = None) -> None:
+    def __init__(
+        self, database: RuntimeDatabase, settings: Settings | None = None
+    ) -> None:
         self._database = database
         self._settings = settings or get_settings()
         self._database.initialize()
@@ -104,7 +109,7 @@ class SQLiteSessionStore:
         with self._database.transaction() as connection:
             self._delete_expired(connection, cutoff)
             active_count = connection.execute(
-                "SELECT COUNT(*) FROM sessions WHERE status = 'active'"
+                "SELECT COUNT(*) FROM sessions"
             ).fetchone()[0]
             if active_count >= self._settings.max_sessions:
                 raise SessionCapacityReached()
@@ -122,7 +127,6 @@ class SQLiteSessionStore:
         *,
         wanted: int,
         query_hash: str,
-        query_summary: str | None,
         filters_desc: str,
         candidates_examined: int,
         now: datetime,
@@ -185,14 +189,13 @@ class SQLiteSessionStore:
             if query_count <= self._settings.max_session_audit_records:
                 connection.execute(
                     """INSERT INTO session_queries(
-                           token_hash, ordinal, query_hash, query_summary, filters_desc,
+                           token_hash, ordinal, query_hash, filters_desc,
                            new_hits, duplicates_suppressed, candidates_examined, created_at
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         token_hash,
                         query_count,
                         query_hash,
-                        query_summary,
                         filters_desc,
                         len(returned),
                         duplicates,
@@ -297,7 +300,9 @@ class SQLiteSessionStore:
                 include_papers=include_papers,
                 include_queries=True,
             )
-            connection.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            connection.execute(
+                "DELETE FROM sessions WHERE token_hash = ?", (token_hash,)
+            )
             return summary
 
     def cleanup_expired(self, *, now: datetime) -> int:
@@ -309,7 +314,7 @@ class SQLiteSessionStore:
     @staticmethod
     def _delete_expired(connection, cutoff: float) -> int:
         cursor = connection.execute(
-            "DELETE FROM sessions WHERE status = 'active' AND last_active_at < ?",
+            "DELETE FROM sessions WHERE last_active_at < ?",
             (cutoff,),
         )
         return cursor.rowcount
@@ -317,13 +322,15 @@ class SQLiteSessionStore:
     @staticmethod
     def _require_active(connection, token_hash: str, cutoff: float):
         row = connection.execute(
-            "SELECT * FROM sessions WHERE token_hash = ? AND status = 'active'",
+            "SELECT * FROM sessions WHERE token_hash = ?",
             (token_hash,),
         ).fetchone()
         if row is None:
             raise SessionNotFoundError()
         if row["last_active_at"] < cutoff:
-            connection.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            connection.execute(
+                "DELETE FROM sessions WHERE token_hash = ?", (token_hash,)
+            )
             raise SessionNotFoundError()
         return row
 
@@ -358,7 +365,6 @@ class SQLiteSessionStore:
         queries = [
             QueryRecord(
                 query_hash=query["query_hash"],
-                query_summary=query["query_summary"],
                 filters_desc=query["filters_desc"],
                 new_hits=query["new_hits"],
                 duplicates_suppressed=query["duplicates_suppressed"],
@@ -375,12 +381,17 @@ class SQLiteSessionStore:
             query_count=row["query_count"],
             unique_papers=unique_papers,
             consecutive_empty_rounds=row["empty_rounds"],
-            exhausted=row["empty_rounds"] >= self._settings.exhausted_after_empty_rounds,
+            exhausted=row["empty_rounds"]
+            >= self._settings.exhausted_after_empty_rounds,
             default_top_k=row["default_top_k"],
             queries=queries,
             papers=[(paper["paper_id"], paper["title"]) for paper in paper_rows],
-            audit_truncated=row["query_count"] > len(queries) if include_queries else False,
-            papers_truncated=unique_papers > len(paper_rows) if include_papers else False,
+            audit_truncated=row["query_count"] > len(queries)
+            if include_queries
+            else False,
+            papers_truncated=unique_papers > len(paper_rows)
+            if include_papers
+            else False,
         )
 
 
@@ -438,7 +449,6 @@ class SessionManager:
         *,
         wanted: int,
         query_hash: str,
-        query_summary: str | None,
         filters_desc: str,
         candidates_examined: int,
     ) -> RoundCommit:
@@ -448,7 +458,6 @@ class SessionManager:
             candidates,
             wanted=wanted,
             query_hash=query_hash,
-            query_summary=query_summary,
             filters_desc=filters_desc,
             candidates_examined=candidates_examined,
             now=self._clock(),
@@ -480,7 +489,9 @@ class SessionManager:
     def close(self, session_id: str, *, include_papers: bool = True) -> SessionSummary:
         """Close a capability and return a bounded final summary."""
         summary = self._store.close(
-            self._token_hash(session_id), include_papers=include_papers, now=self._clock()
+            self._token_hash(session_id),
+            include_papers=include_papers,
+            now=self._clock(),
         )
         summary.session_id = session_id
         return summary

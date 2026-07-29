@@ -1,37 +1,13 @@
 ---
-title: Security and Privacy
-description: Protect the DashScope key, capability sessions, anonymous identities, and public error boundary.
+title: Security
+description: Secrets and public HTTP boundaries.
 ---
 
-Anonymous service does not mean absent security boundaries. The system handles a paid provider secret, session capabilities, external queries, and persistent state.
+- Store the DashScope key in a secret file. Do not put it in source code, images, logs, or command arguments.
+- Replace a key immediately if it appears in chat, terminal records, logs, or a commit.
+- Keep Milvus, etcd, MinIO, metrics, and Attu on loopback or a private network.
+- Configure exact public Host and Origin values.
+- Trust the client-IP header only when the direct peer is in `trusted_proxy_networks`.
+- Treat every `session_id` as a private capability.
 
-## Secrets
-
-- Read a self-hosted key only from an environment secret or read-only file; the file wins.
-- Never place a real key in Git, an image, test fixtures, logs, exceptions, or command arguments.
-- Public clients never need the server-side key.
-- Rotate a key immediately if it enters chat, history, logs, or a commit.
-
-## Queries and data
-
-DashScope receives paper text during indexing and search queries that miss the cache. Do not process credentials, personal information, unpublished research, or other sensitive data.
-
-Runtime state stores neither raw queries nor raw IP addresses. It stores source digests made with a deployment-private salt and normalized query hashes. Session labels are stored verbatim and must also remain nonsensitive.
-
-## Capability sessions
-
-`session_id` is a bearer capability. The server cannot recover the raw ID and offers no global enumeration. Callers must store it safely and close it promptly.
-
-## Transport
-
-- DNS rebinding protection is enabled by default.
-- Public deployments use exact Host and Origin values, not arbitrary wildcards.
-- A proxy source header is trusted only when the peer is in a trusted network.
-- TLS terminates at a controlled sidecar; the application backend is not exposed publicly.
-- Unknown exceptions and provider responses map only to public error codes.
-
-## Containers
-
-The reference image uses a non-root user, a read-only root filesystem, dropped capabilities, and a small tmpfs for the copied secret before privilege drop. The canonical index is read-only to the service; state is a separate writable mount.
-
-Perform threat modeling for the actual host, proxy, and secret manager. Example configuration is not a production security conclusion.
+The container runs the application as UID 10001 with a read-only root filesystem. Root is used only by the entrypoint to copy the secret and set ownership on explicit writable volumes.

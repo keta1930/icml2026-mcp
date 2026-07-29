@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import pytest
 
 from icml_paper_search.config import Settings
-from icml_paper_search.models import Paper, SearchFilters, SearchHit
-from icml_paper_search.service import PaperSearchService
-from icml_paper_search.sessions import SessionManager
+from icml_paper_search.domain.models import Paper, SearchFilters, SearchHit
+from icml_paper_search.runtime.sessions import SessionManager
+from icml_paper_search.search.service import PaperSearchService
 
 
-def make_paper(n: int, *, area: str = "Deep Learning", spotlight: bool = False) -> Paper:
+def make_paper(
+    n: int, *, area: str = "Deep Learning", spotlight: bool = False
+) -> Paper:
     return Paper(
         paper_id=f"p{n:03d}",
         title=f"Paper {n}",

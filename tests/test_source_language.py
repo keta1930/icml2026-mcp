@@ -14,7 +14,11 @@ from icml_paper_search.cli import main as cli_main
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_ROOTS = (ROOT / "src", ROOT / "tests", ROOT / "docs" / "scripts")
-COMMENT_FILES = (ROOT / ".env.example", ROOT / ".gitignore", ROOT / "deploy" / "compose.yaml")
+COMMENT_FILES = (
+    ROOT / ".env.example",
+    ROOT / ".gitignore",
+    ROOT / "deploy" / "compose.yaml",
+)
 HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
@@ -84,9 +88,12 @@ def find_runtime_literals(path: Path) -> list[LanguageViolation]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     docstring_nodes: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(
-            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-        ) and node.body:
+        if (
+            isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            )
+            and node.body
+        ):
             expression = node.body[0]
             if (
                 isinstance(expression, ast.Expr)
@@ -148,7 +155,9 @@ def _configuration_comment(path: Path, line: str) -> str | None:
 def find_configuration_comments(path: Path) -> list[LanguageViolation]:
     """Find Han characters in format-aware root configuration comments."""
     violations = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         comment = _configuration_comment(path, line)
         if comment is not None and HAN.search(comment):
             violations.append(
@@ -243,8 +252,10 @@ def test_dotenv_single_quote_escape_keeps_hash_inside_value_and_finds_real_comme
 ):
     path = tmp_path / ".env.example"
     path.write_text(
-        r"VALUE='literal \' # 中文值'" "\n"
-        r"CLOSED='literal \''  # 中文注释" "\n",
+        r"VALUE='literal \' # 中文值'"
+        "\n"
+        r"CLOSED='literal \''  # 中文注释"
+        "\n",
         encoding="utf-8",
     )
 
@@ -274,5 +285,5 @@ def test_cli_help_uses_the_english_contract(capsys):
     assert exit_info.value.code == 0
     output = capsys.readouterr().out
     assert "Local hybrid indexing and search for ICML 2026" in output
-    assert "Preflight or explicitly build a versioned local index" in output
+    assert "Preflight or build the current Milvus index" in output
     assert "Hybrid search (omit query for interactive mode)" in output

@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from icml_paper_search.config import Settings
-from icml_paper_search.errors import SessionCapacityReached, SessionNotFoundError
-from icml_paper_search.models import Paper, SearchHit
-from icml_paper_search.sessions import SessionManager, SQLiteSessionStore
-from icml_paper_search.state import RuntimeDatabase, hash_capability
+from icml_paper_search.domain.errors import SessionCapacityReached, SessionNotFoundError
+from icml_paper_search.domain.models import Paper, SearchHit
+from icml_paper_search.runtime.database import RuntimeDatabase, hash_capability
+from icml_paper_search.runtime.sessions import SessionManager, SQLiteSessionStore
 
 
 class Clock:
     """Provide an advanceable UTC test clock."""
 
     def __init__(self) -> None:
-        self.value = datetime(2026, 7, 28, tzinfo=timezone.utc)
+        self.value = datetime(2026, 7, 28, tzinfo=UTC)
 
     def __call__(self) -> datetime:
         return self.value
@@ -45,9 +45,7 @@ def _settings(tmp_path, **overrides) -> Settings:
 
 def _manager(settings: Settings, clock: Clock) -> SessionManager:
     database = RuntimeDatabase(settings.state_db_path)
-    return SessionManager(
-        settings, SQLiteSessionStore(database, settings), clock=clock
-    )
+    return SessionManager(settings, SQLiteSessionStore(database, settings), clock=clock)
 
 
 def _hits(count: int) -> list[SearchHit]:
@@ -76,7 +74,6 @@ def _commit(manager: SessionManager, token: str, hits: list[SearchHit]):
         hits,
         wanted=5,
         query_hash="a" * 64,
-        query_summary=None,
         filters_desc="",
         candidates_examined=len(hits),
     )
@@ -90,7 +87,9 @@ def test_concurrent_rounds_never_return_same_paper(tmp_path):
     hits = _hits(10)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        rounds = list(executor.map(lambda _index: _commit(manager, token, hits), range(2)))
+        rounds = list(
+            executor.map(lambda _index: _commit(manager, token, hits), range(2))
+        )
 
     first = {hit.paper_id for hit in rounds[0].hits}
     second = {hit.paper_id for hit in rounds[1].hits}

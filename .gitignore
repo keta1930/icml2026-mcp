@@ -16,7 +16,7 @@ secrets/
 *.pem
 dashscope_api_key*
 
-# Chroma, versioned indexes, state databases, and recovery points
+# Local indexes, state databases, and build checkpoints
 .data/
 **/.data/
 *.sqlite

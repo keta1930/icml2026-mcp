@@ -1,4 +1,4 @@
 {
   "title": "Core Concepts",
-  "pages": ["architecture", "hybrid-search", "sessions", "index-lifecycle", "governance"]
+  "pages": ["sessions", "architecture", "hybrid-search", "index-lifecycle", "governance"]
 }

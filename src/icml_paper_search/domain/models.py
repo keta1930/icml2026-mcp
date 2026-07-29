@@ -1,11 +1,12 @@
-"""Vector-database-neutral paper, retrieval, and session domain types."""
+"""Paper-search domain models."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 OPENREVIEW_FORUM = "https://openreview.net/forum?id={}"
 ARXIV_ABS = "https://arxiv.org/abs/{}"
@@ -14,6 +15,7 @@ ARXIV_ABS = "https://arxiv.org/abs/{}"
 @dataclass(frozen=True, slots=True)
 class Paper:
     """Describe the retrieval-facing view of an ICML 2026 paper."""
+
     paper_id: str
     title: str
     abstract: str
@@ -26,17 +28,17 @@ class Paper:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> Paper:
-        """Construct a paper from Chroma metadata or a SQLite row."""
+        """Construct a paper from the current Milvus entity shape."""
         return cls(
-            paper_id=str(value.get("paper_id", value.get("orid", "")) or ""),
+            paper_id=str(value.get("paper_id", "") or ""),
             title=str(value.get("title", "") or ""),
             abstract=str(value.get("abstract", "") or ""),
-            authors=tuple(_load_authors(value.get("authors"))),
+            authors=tuple(_load_authors(value.get("authors_json"))),
             area=str(value.get("area", "") or ""),
-            subarea=str(value.get("subarea", value.get("sub", "")) or ""),
-            paper_type=str(value.get("paper_type", value.get("type", "")) or ""),
-            spotlight=_load_bool(value.get("spotlight", value.get("spot", False))),
-            arxiv_id=str(value.get("arxiv_id", value.get("arxiv", "")) or ""),
+            subarea=str(value.get("subarea", "") or ""),
+            paper_type=str(value.get("paper_type", "") or ""),
+            spotlight=bool(value.get("spotlight", False)),
+            arxiv_id=str(value.get("arxiv_id", "") or ""),
         )
 
     @property
@@ -51,28 +53,20 @@ class Paper:
 
 
 def _load_authors(raw: Any) -> list[str]:
-    """Parse an author list from metadata defensively."""
-    if isinstance(raw, (list, tuple)):
-        return [str(author) for author in raw]
-    if not raw:
+    """Parse the JSON author list stored in the current Milvus schema."""
+    if not isinstance(raw, str) or not raw:
         return []
     try:
         parsed = json.loads(raw)
     except (TypeError, ValueError):
-        return [str(raw)]
-    return [str(author) for author in parsed] if isinstance(parsed, list) else [str(parsed)]
-
-
-def _load_bool(raw: Any) -> bool:
-    """Accept SQLite integers and Chroma boolean metadata."""
-    if isinstance(raw, str):
-        return raw.strip().lower() in {"1", "true", "yes"}
-    return bool(raw)
+        return []
+    return [str(author) for author in parsed] if isinstance(parsed, list) else []
 
 
 @dataclass(frozen=True, slots=True)
 class SearchHit:
-    """Represent a hit with a weighted-RRF score in `[0,1]`."""
+    """Represent a hit with a Milvus RRF score in `[0,1]`."""
+
     paper: Paper
     score: float
 
@@ -89,6 +83,7 @@ class SearchHit:
 @dataclass(frozen=True, slots=True)
 class SearchFilters:
     """Describe domain filters independent of the retrieval backend."""
+
     area: str | None = None
     paper_type: str | None = None
     spotlight_only: bool = False
@@ -111,6 +106,7 @@ class SearchFilters:
 @dataclass(slots=True)
 class SearchOutcome:
     """Describe one search and its session deduplication statistics."""
+
     query: str
     hits: list[SearchHit]
     search_depth: int
@@ -133,8 +129,8 @@ class SearchOutcome:
 @dataclass(frozen=True, slots=True)
 class QueryRecord:
     """Store a bounded session audit record without the full query."""
+
     query_hash: str
-    query_summary: str | None
     filters_desc: str
     new_hits: int
     duplicates_suppressed: int
@@ -145,6 +141,7 @@ class QueryRecord:
 @dataclass(frozen=True, slots=True)
 class RoundCommit:
     """Return round state exactly matching the atomic SQLite commit."""
+
     hits: list[SearchHit]
     duplicates_suppressed: int
     consecutive_empty_rounds: int
@@ -157,6 +154,7 @@ class RoundCommit:
 @dataclass(slots=True)
 class SessionSummary:
     """Describe a bounded public snapshot of a capability session."""
+
     session_id: str
     label: str
     created_at: datetime

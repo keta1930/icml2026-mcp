@@ -1,78 +1,43 @@
 ---
 title: 本地部署
-description: 从零配置语料索引、DashScope embedding 和本地 Streamable HTTP MCP。
+description: 启动 Milvus、构建索引并运行 MCP 服务。
 ---
 
-自托管不需要 Milvus、GPU、本地模型或外部数据库。运行要求是 Python 3.12+、uv、磁盘和已开通 `qwen3.7-text-embedding` 的 DashScope key。
+## Docker Compose
 
-## 安装
+需要 Docker Compose，以及能够调用 `qwen3.7-text-embedding` 的 DashScope key。
 
 ```bash
+mkdir -p deploy/secrets
+printf '%s' 'YOUR_DASHSCOPE_KEY' > deploy/secrets/dashscope_api_key
+chmod 600 deploy/secrets/dashscope_api_key
+
+docker compose -f deploy/compose.yaml -f deploy/milvus.compose.yaml \
+  up -d etcd minio standalone
+docker compose -f deploy/compose.yaml -f deploy/milvus.compose.yaml \
+  --profile build run --rm build-index
+docker compose -f deploy/compose.yaml -f deploy/milvus.compose.yaml \
+  up -d icml-mcp
+```
+
+本地 MCP 地址是 `http://127.0.0.1:20442/mcp`。索引和运行状态保存在 Docker volume 中。
+
+## 直接运行 Python
+
+先启动项目提供的 Milvus 服务，再安装 Python 项目：
+
+```bash
+docker compose -f deploy/milvus.compose.yaml up -d etcd minio standalone
 uv sync
 cp .env.example .env
 ```
 
-在 `.env` 中配置直接 key，或使用只读 secret 文件：
-
-```dotenv
-ICML_PAPERS_DASHSCOPE_API_KEY=your-dashscope-api-key
-# ICML_PAPERS_DASHSCOPE_API_KEY_FILE=/absolute/path/to/key
-```
-
-两者同时存在时文件优先。`.env` 已被 Git 忽略，但仍要限制权限并避免 key 进入日志和命令历史。
-
-## 零云调用预检
+在 `.env` 中设置 `ICML_PAPERS_DASHSCOPE_API_KEY`，然后构建索引并启动服务：
 
 ```bash
-uv run icml-papers info
 uv run icml-papers build
-```
-
-`info` 检查配置和语料。默认 `build` 只计算 `build_id`、论文数、corpus hash 与保守 Token 上界，不读取 key、不调用 DashScope、不写索引。
-
-## 显式建库
-
-确认预算后执行：
-
-```bash
-uv run icml-papers build --execute --max-input-tokens <TOKEN_CAP>
-```
-
-只有 `--execute` 与正数 cap 同时存在才会发起云调用。索引写入 staging；完整校验通过后才原子切换 `current`。
-
-中断后可以恢复完整 batch：
-
-```bash
-uv run icml-papers build --execute \
-  --max-input-tokens <TOKEN_CAP> --resume
-```
-
-语料、模型、维度、batch size 或 build id 变化时不能 resume，应重新预检和构建。
-
-## 启动与验证
-
-```bash
+uv run icml-papers build --execute --max-input-tokens 10000000
 uv run icml-paper-search-mcp
-curl -fsS http://127.0.0.1:20441/health/live
-curl -fsS http://127.0.0.1:20441/health/ready
 ```
 
-`live` 只检查进程；`ready` 在零云调用条件下验证 state、Chroma、FTS5、manifest 与原始语料指纹。
-
-注册本地 MCP：
-
-```bash
-claude mcp add --transport http icml-papers --scope project \
-  http://127.0.0.1:20441/mcp
-```
-
-## 默认目录
-
-| 路径 | 内容 |
-|---|---|
-| `data/` | 随项目发布的论文快照 |
-| `.data/index/versions/` | 版本化 Chroma、FTS5 与 manifest |
-| `.data/index/current` | 当前发布版本指针 |
-| `.data/state/runtime.sqlite3` | session、限流、预算与 embedding cache |
-
-不要让多个应用进程共享同一 Chroma 目录。生产运行请继续阅读 [Docker 部署](/zh/docs/operations/docker) 和[容量规划](/zh/docs/operations/capacity)。
+直接运行时的地址是 `http://127.0.0.1:20441/mcp`。

@@ -1,4 +1,4 @@
 {
   "title": "Guides",
-  "pages": ["research-workflow", "filters-and-scoring", "mcp-clients", "rebuild-index"]
+  "pages": ["mcp-clients", "rebuild-index"]
 }

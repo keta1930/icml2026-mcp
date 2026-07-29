@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import pytest
 
-from icml_paper_search.models import Paper, SearchFilters, SearchHit
+from icml_paper_search.domain.models import Paper, SearchFilters, SearchHit
 
 
-def test_paper_from_mapping_accepts_backend_aliases():
+def test_paper_from_mapping_accepts_current_milvus_entity():
     paper = Paper.from_mapping(
         {
-            "orid": "abc123",
+            "paper_id": "abc123",
             "title": "T",
             "abstract": "A",
-            "authors": '["Alice", "Bob"]',
+            "authors_json": '["Alice", "Bob"]',
             "area": "Theory",
-            "sub": "Learning Theory",
-            "type": "Oral",
-            "spot": True,
-            "arxiv": "2605.00001",
+            "subarea": "Learning Theory",
+            "paper_type": "Oral",
+            "spotlight": True,
+            "arxiv_id": "2605.00001",
         }
     )
 
@@ -31,16 +31,17 @@ def test_paper_from_mapping_accepts_backend_aliases():
     assert paper.arxiv_url == "https://arxiv.org/abs/2605.00001"
 
 
-def test_paper_from_mapping_tolerates_metadata_shapes():
-    assert Paper.from_mapping({"authors": "not json"}).authors == ("not json",)
-    assert Paper.from_mapping({"authors": None}).authors == ()
-    assert Paper.from_mapping({"authors": ("X",)}).authors == ("X",)
-    assert Paper.from_mapping({"spotlight": "true"}).spotlight is True
+def test_paper_from_mapping_rejects_invalid_author_json_as_empty():
+    assert Paper.from_mapping({"authors_json": "not json"}).authors == ()
+    assert Paper.from_mapping({"authors_json": "null"}).authors == ()
+    assert Paper.from_mapping({"authors_json": '["X"]'}).authors == ("X",)
     assert Paper.from_mapping({"paper_id": "x"}).arxiv_url == ""
 
 
 def test_filters_only_describe_domain_values():
-    filters = SearchFilters(area='Deep "Learning"', paper_type="Oral", spotlight_only=True)
+    filters = SearchFilters(
+        area='Deep "Learning"', paper_type="Oral", spotlight_only=True
+    )
 
     assert filters.describe() == 'area=Deep "Learning", type=Oral, spotlight-only'
     assert not filters.is_empty

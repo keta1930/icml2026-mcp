@@ -1,335 +1,149 @@
-"""Chroma/FTS5 persistence, filtering, RRF, and fixed-window tests."""
+"""Milvus native dense/BM25 retrieval and repository boundary tests."""
 
 from __future__ import annotations
 
-import json
-from dataclasses import replace
+from datetime import UTC, datetime
 
-import pytest
-
-from icml_paper_search.bm25 import BM25IndexBuilder, RankedPaperId
-from icml_paper_search.catalog import (
-    PaperRecord,
-    corpus_hash,
-    data_file_hashes,
-    paper_ids_hash,
-)
 from icml_paper_search.config import Settings
-from icml_paper_search.errors import IndexUnavailable
-from icml_paper_search.manifest import (
-    IndexManifest,
-    IndexPaths,
-    collection_metadata_for,
-    collection_name_for,
-    promote_staging,
-    write_manifest,
+from icml_paper_search.domain.models import SearchFilters
+from icml_paper_search.indexing.manifest import IndexManifest
+from icml_paper_search.milvus.repository import (
+    MilvusPaperRepository,
+    _filter_expression,
 )
-from icml_paper_search.models import SearchFilters
-from icml_paper_search.retrieval import ChromaHybridSearchEngine, _weighted_rrf
 
-DIMENSION = 1024
+
+def _manifest(settings: Settings) -> IndexManifest:
+    return IndexManifest(
+        format="milvus-dense-bm25-rrf",
+        build_id="a" * 16,
+        collection_name="icml2026_mcp_" + "a" * 16,
+        corpus_hash="b" * 64,
+        paper_ids_hash="c" * 64,
+        record_count=2,
+        data_file_hashes={"index.json": "d" * 64, "abstracts.json": "e" * 64},
+        embedding_model=settings.embedding_model,
+        embedding_dim=settings.embedding_dim,
+        milvus_version="2.5.27",
+        pymilvus_version="2.5.18",
+        dense_metric="COSINE",
+        sparse_metric="BM25",
+        fusion="RRF",
+        built_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def _entity(paper_id: str, title: str) -> dict[str, object]:
+    return {
+        "paper_id": paper_id,
+        "title": title,
+        "abstract": f"Abstract for {title}",
+        "authors_json": '["Alice", "Bob"]',
+        "area": "Theory",
+        "subarea": "Learning Theory",
+        "paper_type": "Poster",
+        "spotlight": False,
+        "arxiv_id": "2605.00001",
+    }
 
 
 class FakeEncoder:
-    """Return a fixed query vector so tests never access the network."""
+    def __init__(self, dimension: int) -> None:
+        self.dimension = dimension
+        self.queries: list[str] = []
 
-    def __init__(self, vector):
-        self.vector = vector
-        self.calls = 0
-
-    def encode_query(self, _text):
-        self.calls += 1
-        return list(self.vector)
+    def encode_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        return [0.25] * self.dimension
 
     def encode_documents(self, texts, *, show_progress=False):
-        del show_progress
-        return [list(self.vector) for _text in texts]
+        return [[0.25] * self.dimension for _ in texts]
+
+    def close(self) -> None:
+        return None
 
 
-def make_record(
-    paper_id: str,
-    title: str,
-    abstract: str,
-    *,
-    area: str,
-    paper_type: str = "Poster",
-    spot: bool = False,
-) -> PaperRecord:
-    text = f"{title}\n{abstract}"
-    return PaperRecord(
-        fields={
-            "orid": paper_id,
-            "i": 1,
-            "title": title,
-            "abstract": abstract,
-            "text": text,
-            "authors": json.dumps(["Alice"]),
-            "area": area,
-            "sub": "",
-            "type": paper_type,
-            "spot": spot,
-            "pid": "1",
-            "arxiv": "",
-        },
-        text=text,
-    )
+class FakeClient:
+    def __init__(self) -> None:
+        self.hybrid_calls = []
+        self.get_calls = []
+        self.closed = False
 
-
-def write_source_files(path, records):
-    """Write source corpus snapshots matching the test index."""
-    papers = []
-    abstracts = {}
-    for record in records:
-        fields = record.fields
-        papers.append(
-            {
-                "i": fields["i"],
-                "pid": fields["pid"],
-                "orid": record.paper_id,
-                "title": fields["title"],
-                "authors": json.loads(fields["authors"]),
-                "area": fields["area"],
-                "sub": fields["sub"],
-                "type": fields["type"],
-                "spot": fields["spot"],
-                "arxiv": fields["arxiv"],
-            }
-        )
-        abstracts[record.paper_id] = fields["abstract"]
-    (path / "index.json").write_text(
-        json.dumps({"papers": papers}), encoding="utf-8"
-    )
-    (path / "abstracts.json").write_text(json.dumps(abstracts), encoding="utf-8")
-
-
-@pytest.fixture
-def local_index(tmp_path):
-    import chromadb
-
-    settings = Settings(index_root=tmp_path / "index", data_dir=tmp_path)
-    records = [
-        make_record("p1", "Vision transformer", "attention image model", area="Vision"),
-        make_record(
-            "p2", "Graph theory", "spectral graph learning", area="Theory", spot=True
-        ),
-        make_record("p3", "Language agents", "tool using language model", area="NLP"),
-    ]
-    vectors = []
-    for index in range(len(records)):
-        vector = [0.0] * DIMENSION
-        vector[index] = 1.0
-        vectors.append(vector)
-
-    write_source_files(tmp_path, records)
-
-    digest = corpus_hash(records)
-    build_id = f"v1-{digest[:16]}-{DIMENSION}d"
-    paths = IndexPaths.for_root(settings.index_root)
-    staging = paths.staging(build_id)
-    staging.mkdir(parents=True)
-    collection_name = collection_name_for(build_id)
-    manifest = IndexManifest.create(
-        build_id=build_id,
-        corpus_hash=digest,
-        paper_ids_hash=paper_ids_hash(record.paper_id for record in records),
-        record_count=len(records),
-        data_file_hashes=data_file_hashes(settings),
-        settings=settings,
-        collection_name=collection_name,
-    )
-    client = chromadb.PersistentClient(path=str(staging / "chroma"))
-    collection = client.create_collection(
-        name=collection_name,
-        metadata=collection_metadata_for(manifest),
-        embedding_function=None,
-    )
-    collection.add(
-        ids=[record.paper_id for record in records],
-        embeddings=vectors,
-        documents=[record.text for record in records],
-        metadatas=[record.fields for record in records],
-    )
-    with BM25IndexBuilder(staging / "bm25.sqlite3") as builder:
-        builder.add_records(records)
-        builder.finalize(corpus_hash=digest)
-    write_manifest(staging, manifest)
-    promote_staging(settings.index_root, build_id)
-    return settings, records, vectors
-
-
-def test_persistent_hybrid_search_filter_and_ordered_fetch(local_index):
-    settings, _records, vectors = local_index
-    engine = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[1]))
-
-    hits = engine.search(
-        "spectral graph", limit=3, filters=SearchFilters(area="Theory", spotlight_only=True)
-    )
-    assert [hit.paper_id for hit in hits] == ["p2"]
-    assert 0.0 <= hits[0].score <= 1.0
-    fetched = engine.fetch(["p3", "missing", "p1", "p3"])
-    assert [paper.paper_id for paper in fetched] == ["p3", "p1"]
-    engine.close()
-
-    reopened = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[0]))
-    assert reopened.count() == 3
-    assert reopened.validate().record_count == 3
-    assert reopened.fetch(["p1"])[0].title == "Vision transformer"
-    reopened.close()
-
-
-def test_weighted_rrf_normalizes_and_uses_stable_tie_break():
-    dense = [RankedPaperId("dense-only", 1, 0.9), RankedPaperId("both", 2, 0.8)]
-    bm25 = [RankedPaperId("both", 1, -2.0), RankedPaperId("bm25-only", 2, -1.0)]
-
-    ranked = _weighted_rrf(
-        dense, bm25, dense_weight=0.8, bm25_weight=0.2, rrf_k=60, limit=3
-    )
-    assert [paper_id for paper_id, _score in ranked] == [
-        "both",
-        "dense-only",
-        "bm25-only",
-    ]
-    assert all(0.0 <= score <= 1.0 for _paper_id, score in ranked)
-
-    tied = _weighted_rrf(
-        [RankedPaperId("b", 1, 0.0), RankedPaperId("a", 1, 0.0)],
-        [],
-        dense_weight=1.0,
-        bm25_weight=0.0,
-        rrf_k=60,
-        limit=2,
-    )
-    assert [paper_id for paper_id, _score in tied] == ["a", "b"]
-
-
-def test_search_calls_each_retriever_once_with_requested_limit():
-    settings = Settings()
-    encoder = FakeEncoder([0.0] * DIMENSION)
-    engine = ChromaHybridSearchEngine(settings, encoder)
-    engine._manifest = IndexManifest.create(
-        build_id="v1-fixed-window",
-        corpus_hash="0" * 64,
-        paper_ids_hash=paper_ids_hash(["p1", "p2"]),
-        record_count=2,
-        data_file_hashes={"index.json": "0" * 64, "abstracts.json": "1" * 64},
-        settings=settings,
-        collection_name="icml-papers-fixed-window",
-    )
-
-    class Collection:
-        def __init__(self):
-            self.query_calls = []
-            self.get_calls = 0
-
-        def query(self, **kwargs):
-            self.query_calls.append(kwargs)
-            return {"ids": [["p1", "p2"]], "distances": [[0.1, 0.2]]}
-
-        def get(self, **_kwargs):
-            self.get_calls += 1
-            metadatas = [
-                make_record("p1", "One", "alpha", area="A").fields,
-                make_record("p2", "Two", "beta", area="A").fields,
+    def hybrid_search(self, collection, requests, ranker, limit, **kwargs):
+        self.hybrid_calls.append((collection, requests, ranker, limit, kwargs))
+        return [
+            [
+                {"distance": 2 / 61, "entity": _entity("p1", "First")},
+                {"distance": 1 / 61 + 1 / 62, "entity": _entity("p2", "Second")},
             ]
-            return {"ids": ["p1", "p2"], "metadatas": metadatas, "documents": ["", ""]}
+        ][:limit]
 
-    class Sparse:
-        def __init__(self):
-            self.calls = []
+    def get(self, collection, ids, **kwargs):
+        self.get_calls.append((collection, ids, kwargs))
+        rows = {"p1": _entity("p1", "First"), "p2": _entity("p2", "Second")}
+        return [rows[paper_id] for paper_id in reversed(ids) if paper_id in rows]
 
-        def search(self, query, *, limit, filters):
-            self.calls.append((query, limit, filters))
-            return [RankedPaperId("p2", 1, -1.0)]
-
-    collection = Collection()
-    sparse = Sparse()
-    engine._collection = collection
-    engine._bm25 = sparse
-
-    hits = engine.search("query", limit=2, filters=SearchFilters())
-
-    assert len(hits) == 2
-    assert encoder.calls == 1
-    assert len(collection.query_calls) == 1
-    assert collection.query_calls[0]["n_results"] == 2
-    assert sparse.calls[0][1] == 2
+    def close(self) -> None:
+        self.closed = True
 
 
-def test_manifest_config_mismatch_fails_closed(local_index):
-    settings, _records, vectors = local_index
-    paths = IndexPaths.for_root(settings.index_root)
-    version = paths.version(paths.current.read_text().strip())
-    manifest = IndexManifest(**json.loads((version / "manifest.json").read_text()))
-    write_manifest(version, replace(manifest, embedding_dim=768))
-
-    engine = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[0]))
-    with pytest.raises(IndexUnavailable):
-        engine.count()
-
-
-def test_collection_contract_metadata_mismatch_fails_closed(local_index):
-    import chromadb
-
-    settings, _records, vectors = local_index
-    version = IndexPaths.for_root(settings.index_root).version(
-        IndexPaths.for_root(settings.index_root).current.read_text().strip()
+def _repository(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        index_root=tmp_path / "index",
+        state_db_path=tmp_path / "state.sqlite3",
     )
-    manifest = IndexManifest(**json.loads((version / "manifest.json").read_text()))
-    client = chromadb.PersistentClient(path=str(version / "chroma"))
-    collection = client.get_collection(manifest.collection_name, embedding_function=None)
-    metadata = dict(collection.metadata or {})
-    metadata.pop("hnsw:space")
-    metadata["dense_metric"] = "l2"
-    collection.modify(metadata=metadata)
-
-    engine = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[0]))
-    with pytest.raises(IndexUnavailable):
-        engine.count()
+    encoder = FakeEncoder(settings.embedding_dim)
+    client = FakeClient()
+    repository = MilvusPaperRepository(settings, encoder, client_factory=lambda: client)
+    repository._manifest = _manifest(settings)
+    return repository, encoder, client
 
 
-def test_same_count_with_different_paper_ids_fails_closed(local_index):
-    import chromadb
-
-    settings, _records, vectors = local_index
-    paths = IndexPaths.for_root(settings.index_root)
-    version = paths.version(paths.current.read_text().strip())
-    manifest = IndexManifest(**json.loads((version / "manifest.json").read_text()))
-    client = chromadb.PersistentClient(path=str(version / "chroma"))
-    collection = client.get_collection(manifest.collection_name, embedding_function=None)
-    collection.delete(ids=["p3"])
-    replacement = make_record("p4", "Replacement", "different", area="NLP")
-    collection.add(
-        ids=[replacement.paper_id],
-        embeddings=[vectors[2]],
-        documents=[replacement.text],
-        metadatas=[replacement.fields],
+def test_search_uses_dense_and_bm25_with_unweighted_rrf(tmp_path):
+    repository, encoder, client = _repository(tmp_path)
+    filters = SearchFilters(
+        area='Deep "Learning"', paper_type="Poster", spotlight_only=True
     )
 
-    engine = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[0]))
-    with pytest.raises(IndexUnavailable):
-        engine.count()
+    hits = repository.search("robust learning", limit=2, filters=filters)
 
-
-def test_source_snapshot_hash_mismatch_fails_closed(local_index):
-    settings, _records, vectors = local_index
-    settings.abstracts_path.write_text('{"p1": "changed"}', encoding="utf-8")
-
-    engine = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[0]))
-    with pytest.raises(IndexUnavailable):
-        engine.count()
-
-
-def test_source_corpus_fingerprint_mismatch_fails_closed(local_index):
-    settings, _records, vectors = local_index
-    paths = IndexPaths.for_root(settings.index_root)
-    version = paths.version(paths.current.read_text().strip())
-    manifest = IndexManifest(**json.loads((version / "manifest.json").read_text()))
-    settings.abstracts_path.write_text('{"p1": "changed"}', encoding="utf-8")
-    write_manifest(
-        version,
-        replace(manifest, data_file_hashes=data_file_hashes(settings)),
+    assert encoder.queries == ["robust learning"]
+    collection, requests, ranker, limit, kwargs = client.hybrid_calls[0]
+    assert collection == repository.manifest.collection_name
+    assert [request._anns_field for request in requests] == [
+        "dense_vector",
+        "sparse_vector",
+    ]
+    assert requests[0]._data == [[0.25] * repository._settings.embedding_dim]
+    assert requests[1]._data == ["robust learning"]
+    assert requests[0]._expr == requests[1]._expr
+    assert requests[0]._expr == (
+        'area == "Deep \\"Learning\\"" and paper_type == "Poster" and spotlight == true'
     )
+    assert ranker.dict() == {"strategy": "rrf", "params": {"k": 60}}
+    assert limit == 2
+    assert kwargs["output_fields"][0] == "paper_id"
+    assert [hit.paper_id for hit in hits] == ["p1", "p2"]
+    assert hits[0].score == 1.0
+    assert 0.98 < hits[1].score < 1.0
 
-    engine = ChromaHybridSearchEngine(settings, FakeEncoder(vectors[0]))
-    with pytest.raises(IndexUnavailable):
-        engine.count()
+
+def test_fetch_preserves_first_requested_order_and_removes_duplicates(tmp_path):
+    repository, _, client = _repository(tmp_path)
+    papers = repository.fetch(["p2", "missing", "p1", "p2"])
+    assert [paper.paper_id for paper in papers] == ["p2", "p1"]
+    assert client.get_calls[0][1] == ["p2", "missing", "p1"]
+
+
+def test_filter_expression_uses_exact_current_fields():
+    assert _filter_expression(SearchFilters()) == ""
+    assert _filter_expression(SearchFilters(area="Theory")) == 'area == "Theory"'
+    assert _filter_expression(SearchFilters(spotlight_only=True)) == "spotlight == true"
+
+
+def test_close_closes_encoder_and_thread_clients(tmp_path):
+    repository, _, client = _repository(tmp_path)
+    repository.fetch(["p1"])
+    repository.close()
+    assert client.closed

@@ -6,14 +6,14 @@ import argparse
 import logging
 import sys
 
-from .catalog import get_catalog
-from .config import get_settings
-from .errors import AppError, public_error_text
-from .formatting import format_search_outcome
-from .ingest import build_index, plan_build
-from .manifest import load_manifest, resolve_current
-from .models import SearchFilters
-from .service import PaperSearchService
+from ..config import get_settings
+from ..corpus.catalog import get_catalog
+from ..domain.errors import AppError, public_error_text
+from ..domain.models import SearchFilters
+from ..indexing.builder import build_index, plan_build
+from ..indexing.manifest import load_current_manifest
+from ..search.formatting import format_search_outcome
+from ..search.service import PaperSearchService
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     build = subcommands.add_parser(
-        "build", help="Preflight or explicitly build a versioned local index"
+        "build", help="Preflight or build the current Milvus index"
     )
     build.add_argument(
         "--execute",
@@ -38,21 +38,37 @@ def main(argv: list[str] | None = None) -> int:
         help="Hard input-token cap for this build; required with --execute",
     )
     build.add_argument(
-        "--resume", action="store_true", help="Resume from a matching complete-batch checkpoint"
+        "--resume",
+        action="store_true",
+        help="Resume from a matching complete-batch checkpoint",
     )
 
-    search = subcommands.add_parser("search", help="Hybrid search (omit query for interactive mode)")
+    search = subcommands.add_parser(
+        "search", help="Hybrid search (omit query for interactive mode)"
+    )
     search.add_argument("query", nargs="*", help="Search query")
-    search.add_argument("-k", "--top-k", type=int, default=None, help="Number of results")
-    search.add_argument("-d", "--depth", type=int, default=None, help="Fixed window depth")
-    search.add_argument("--area", default=None, help="Filter by research area")
-    search.add_argument("--type", dest="paper_type", default=None, help="Filter by paper type")
-    search.add_argument("--spotlight", action="store_true", help="Return spotlight papers only")
     search.add_argument(
-        "--session", action="store_true", help="Enable session deduplication in interactive mode"
+        "-k", "--top-k", type=int, default=None, help="Number of results"
+    )
+    search.add_argument(
+        "-d", "--depth", type=int, default=None, help="Fixed window depth"
+    )
+    search.add_argument("--area", default=None, help="Filter by research area")
+    search.add_argument(
+        "--type", dest="paper_type", default=None, help="Filter by paper type"
+    )
+    search.add_argument(
+        "--spotlight", action="store_true", help="Return spotlight papers only"
+    )
+    search.add_argument(
+        "--session",
+        action="store_true",
+        help="Enable session deduplication in interactive mode",
     )
 
-    subcommands.add_parser("info", help="Show local index, model, and corpus information")
+    subcommands.add_parser(
+        "info", help="Show local index, model, and corpus information"
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
@@ -72,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_build(args: argparse.Namespace) -> int:
-    """Show preflight first, then execute only with confirmation and a hard cap."""
+    """Show preflight first, then execute only with confirmation and an input cap."""
     settings = get_settings()
     plan = plan_build(settings)
     print(f"build_id              : {plan.build_id}")
@@ -90,9 +106,9 @@ def _run_build(args: argparse.Namespace) -> int:
         execute=True,
         resume=args.resume,
     )
-    print(f"mode                  : executed")
+    print("mode                  : executed")
     print(f"actual_input_tokens   : {result.total_tokens}")
-    print(f"version_path          : {result.version_path}")
+    print(f"manifest_path         : {result.manifest_path}")
     return 0
 
 
@@ -103,21 +119,20 @@ def _info() -> int:
         settings.dashscope_api_key is not None
         or settings.dashscope_api_key_file is not None
     )
-    print(f"index_root : {settings.index_root}")
+    print(f"manifest   : {settings.index_root}")
     print(f"state_db   : {settings.state_db_path}")
+    print(f"milvus     : {settings.milvus_uri}")
     print(f"embedding  : {settings.embedding_model} ({settings.embedding_dim}d)")
     print(f"key        : {'configured' if key_configured else 'unconfigured'}")
-    print(
-        f"rrf        : dense={settings.dense_weight} "
-        f"bm25={settings.bm25_weight} k={settings.rrf_k}"
-    )
+    print("retrieval  : dense COSINE + BM25, fused with RRF")
     try:
-        version = resolve_current(settings.index_root)
-        manifest = load_manifest(version)
+        manifest = load_current_manifest(settings.index_root)
     except AppError:
         print("current    : not ready")
     else:
-        print(f"current    : {manifest.build_id} ({manifest.record_count} papers)")
+        print(
+            f"collection : {manifest.collection_name} ({manifest.record_count} papers)"
+        )
     print()
     print(get_catalog(settings).render())
     return 0

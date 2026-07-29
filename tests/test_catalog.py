@@ -6,14 +6,14 @@ import json
 
 import pytest
 
-from icml_paper_search.catalog import (
+from icml_paper_search.config import Settings
+from icml_paper_search.corpus.catalog import (
     Catalog,
     corpus_hash,
     data_file_hashes,
     get_catalog,
     load_records,
 )
-from icml_paper_search.config import Settings
 
 INDEX = {
     "papers": [
@@ -55,21 +55,23 @@ def test_load_records_joins_abstracts(data_dir):
     records = load_records(Settings(data_dir=data_dir))
 
     assert [r.paper_id for r in records] == ["a1", "a2", "a3"]
-    assert records[0].text == "First\nAbstract one."
-    assert records[0].fields["abstract"] == "Abstract one."
+    assert records[0].document == "First\nAbstract one."
+    assert records[0].abstract == "Abstract one."
     # Papers without abstracts remain indexable using title-only text.
-    assert records[2].fields["abstract"] == ""
-    assert records[2].text == "Third"
+    assert records[2].abstract == ""
+    assert records[2].document == "Third"
 
 
 def test_load_records_serializes_authors_and_defaults(data_dir):
     records = load_records(Settings(data_dir=data_dir))
 
-    assert json.loads(records[0].fields["authors"]) == ["Alice"]
-    assert records[0].fields["spot"] is True
+    entity = records[0].milvus_entity([0.1, 0.2])
+    assert json.loads(entity["authors_json"]) == ["Alice"]
+    assert entity["spotlight"] is True
+    assert entity["dense_vector"] == [0.1, 0.2]
     # Missing optional fields use empty values rather than None.
-    assert records[2].fields["area"] == ""
-    assert records[2].fields["spot"] is False
+    assert records[2].area == ""
+    assert records[2].spotlight is False
 
 
 def test_catalog_counts_areas_and_spotlights(data_dir):
@@ -90,7 +92,7 @@ def test_catalog_accepts_settings_instance(data_dir):
 
 def test_catalog_render_lists_filter_values(data_dir):
     text = get_catalog(Settings(data_dir=data_dir)).render()
-    assert "Theory  (2)" in text
+    assert "Theory (2)" in text
     assert "Available paper_type values:" in text
 
 
@@ -103,8 +105,8 @@ def test_catalog_render_preserves_taxonomy_values_verbatim():
     ).render()
 
     assert "ICML 2026 corpus: 2 papers, including 1 spotlight papers." in text
-    assert "机器学习  (2)" in text
-    assert "海报  (2)" in text
+    assert "机器学习 (2)" in text
+    assert "海报 (2)" in text
 
 
 def test_missing_data_file_names_the_path(tmp_path):

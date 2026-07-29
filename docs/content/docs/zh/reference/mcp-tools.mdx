@@ -1,33 +1,22 @@
 ---
-title: MCP Tools
-description: 六个公开 MCP 工具的生成型参数 Reference 与调用语义。
+title: MCP 工具
+description: 六个公开 MCP 工具的生成型参数说明。
 ---
 
-工具参数表由 `docs/scripts/generate_reference.py` 从 FastMCP schema 生成。修改工具签名或 Pydantic `Field` 后，文档构建会刷新下方内容。
+MCP 客户端会直接从服务读取这些 schema。下表由同一份源码生成。
 
-## 调用约定
+## 行为
 
-- 所有工具都是 async MCP tools，`Context` 不进入公开 schema。
-- 返回值是紧凑 text content，直接进入 agent context。
-- 业务失败同样返回 text，格式为 `error[code]: message`。
-- `session_id` 是业务 capability，不是 MCP transport session id。
-- 未传 `session_id` 的 `search_papers` 保持无状态。
-
-## 典型组合
-
-```text
-open_search_session -> search_papers (多次)
-  -> search_session_status -> close_search_session
-```
-
-`get_papers` 可以独立调用；传入 session 时，实际找到的论文会原子登记为 seen。`list_paper_areas` 用于在搜索前发现可用过滤值。
+- 结果和错误都以简短英文文本返回。
+- 不传 `session_id` 的搜索不保存记录。
+- 在搜索会话中，已经返回的论文会被记录，后续搜索不会重复返回。
 
 ## 生成型参数表
 
 <include>../../../../generated/zh/mcp-tools.mdx</include>
 
-## 相关语义
+## 相关文档
 
-- Fixed window 与 score：[混合检索](/zh/docs/concepts/hybrid-search)
-- Session 原子性：[Capability Session](/zh/docs/concepts/sessions)
+- 排名行为：[检索](/zh/docs/concepts/hybrid-search)
+- 会话行为：[搜索会话](/zh/docs/concepts/sessions)
 - 稳定失败分类：[错误码](/zh/docs/reference/errors)

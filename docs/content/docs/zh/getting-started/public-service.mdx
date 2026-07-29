@@ -1,24 +1,22 @@
 ---
-title: 连接公共服务
-description: 无需 DashScope key，把公共 ICML MCP 注册到客户端并完成第一次搜索。
+title: 公共服务
+description: 将 MCP 客户端连接到公共实例。
 ---
 
-公共实例适合快速验证工具和轻量调研。客户端不需要提供 DashScope key。
+服务地址：
 
-## 注册 Claude Code
+```text
+https://icml.agent4sci.com:20441/mcp
+```
+
+Claude Code：
 
 ```bash
 claude mcp add --transport http icml-papers --scope user \
   https://icml.agent4sci.com:20441/mcp
 ```
 
-确认服务已经注册：
-
-```bash
-claude mcp list
-```
-
-其他兼容 MCP 的客户端使用以下配置：
+通用 Streamable HTTP 配置：
 
 ```json
 {
@@ -31,45 +29,4 @@ claude mcp list
 }
 ```
 
-## 为什么浏览器打开 `/mcp` 会返回 406
-
-`/mcp` 是 MCP Streamable HTTP 协议端点，不是网页或普通 REST JSON API。浏览器地址栏发出的 GET 通常不包含 `Accept: text/event-stream`，因此 SDK 返回 HTTP 406 和 `Client must accept text/event-stream`；这是预期的内容协商结果，不表示服务不可用。
-
-应使用支持 Streamable HTTP 的 MCP 客户端，由 SDK 完成 POST `initialize`、`Accept: application/json, text/event-stream`、transport session 和后续请求。人工检查服务请访问：
-
-```text
-https://icml.agent4sci.com:20441/health/live
-https://icml.agent4sci.com:20441/health/ready
-```
-
-## 第一次调用
-
-让客户端调用：
-
-```text
-search_papers(query="discrete diffusion language models", top_k=5)
-```
-
-这是无状态搜索。需要连续换词且不重复论文时，先创建 session：
-
-```text
-open_search_session(label="diffusion LM", default_top_k=5)
-search_papers(query="masked diffusion text", session_id="...")
-```
-
-## 公共实例边界
-
-- 匿名共享，不提供 SLA。
-- 每个来源 IP 和全局都有速率、日额度与排队上限。
-- 共享 NAT 下的多人会共用同一 IP 配额。
-- `session_id` 是 bearer capability；不要公开、记录或提交它。
-- query 和 session 标签不得包含 secret、个人信息或未公开内容。
-
-响应头中的 `Mcp-Session-Id` 属于 transport session；`open_search_session` 返回的是用于论文去重的业务 capability session。两者不能混用。
-
-遇到 `rate_limited` 或 `server_busy` 时等待后重试；遇到 `budget_exhausted` 或 `embedding_quota_exhausted` 时，继续重试不会立即恢复服务。完整分类见[错误码](/zh/docs/reference/errors)。
-
-## 下一步
-
-- 用[第一个调研会话](/zh/docs/getting-started/first-session)完成一轮系统检索。
-- 需要稳定额度时转到[本地部署](/zh/docs/getting-started/local-deployment)。
+公共实例的额度由所有用户共享，维护期间可能暂时不可用。需要独立服务或独立数据时，请使用本地部署。

@@ -7,8 +7,7 @@ from http import HTTPStatus
 import pytest
 
 from icml_paper_search.config import Settings
-from icml_paper_search.embedding import DashScopeEncoder
-from icml_paper_search.errors import (
+from icml_paper_search.domain.errors import (
     EmbeddingConfigurationError,
     EmbeddingProtocolError,
     EmbeddingQuotaExhausted,
@@ -16,6 +15,7 @@ from icml_paper_search.errors import (
     EmbeddingUnavailable,
     public_error_text,
 )
+from icml_paper_search.embeddings.dashscope import DashScopeEncoder
 
 DIMENSION = 1024
 SENTINEL = "secret-sentinel-never-print"
@@ -100,10 +100,16 @@ def test_documents_batch_at_20_and_restore_text_index_order():
     [
         response(1, dimension=DIMENSION - 1),
         response(1, order=[1]),
-        {"status_code": 200, "output": {"embeddings": []}, "usage": {"total_tokens": 1}},
         {
             "status_code": 200,
-            "output": {"embeddings": [{"text_index": 0, "embedding": [True] * DIMENSION}]},
+            "output": {"embeddings": []},
+            "usage": {"total_tokens": 1},
+        },
+        {
+            "status_code": 200,
+            "output": {
+                "embeddings": [{"text_index": 0, "embedding": [True] * DIMENSION}]
+            },
             "usage": {"total_tokens": 1},
         },
     ],

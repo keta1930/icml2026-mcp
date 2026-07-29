@@ -1,0 +1,41 @@
+name: Validate project
+
+on:
+  push:
+    branches:
+      - opensource
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Check Python source
+        run: |
+          uv run ruff format --check src tests docs/scripts
+          uv run ruff check src docs/scripts
+
+      - name: Run tests
+        run: uv run python -m pytest -q
+
+      - name: Validate Compose contract
+        run: docker compose -f deploy/compose.yaml -f deploy/milvus.compose.yaml config --quiet

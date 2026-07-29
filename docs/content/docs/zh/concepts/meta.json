@@ -1,4 +1,4 @@
 {
   "title": "核心概念",
-  "pages": ["architecture", "hybrid-search", "sessions", "index-lifecycle", "governance"]
+  "pages": ["sessions", "architecture", "hybrid-search", "index-lifecycle", "governance"]
 }

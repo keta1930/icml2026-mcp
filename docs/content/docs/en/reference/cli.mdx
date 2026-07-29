@@ -1,9 +1,9 @@
 ---
 title: CLI
-description: Commands, parameters, and exit semantics for icml-papers and icml-paper-search-mcp.
+description: Commands for inspecting, building, searching, and serving.
 ---
 
-The project installs two console scripts: `icml-papers` manages indexes and local retrieval; `icml-paper-search-mcp` starts the Streamable HTTP service.
+The project installs `icml-papers` for index work and local testing, and `icml-paper-search-mcp` for the MCP service.
 
 ## `icml-papers info`
 
@@ -11,7 +11,7 @@ The project installs two console scripts: `icml-papers` manages indexes and loca
 uv run icml-papers info
 ```
 
-The command prints data and state paths, embedding contract, RRF settings, current index version, and corpus statistics. It checks whether a key is configured without reading the secret or contacting the provider.
+Print the Milvus endpoint, current collection, model, paths, and corpus statistics. This command does not call DashScope.
 
 ## `icml-papers build`
 
@@ -20,39 +20,29 @@ uv run icml-papers build
 uv run icml-papers build --execute --max-input-tokens <CAP>
 ```
 
-| Parameter | Purpose |
+| Option | Purpose |
 |---|---|
 | `--execute` | Confirm DashScope calls and index writes |
-| `--max-input-tokens N` | Hard build Token cap; required with execute |
+| `--max-input-tokens N` | Input-token cap; required with execute |
 | `--resume` | Resume from a matching complete-batch checkpoint |
 
-Default mode is a zero-cloud preflight. Without execute and a positive cap, no paid index build occurs.
+The first command is an offline preflight. The second calls DashScope and writes the Milvus collection. See [Build the index](/en/docs/guides/rebuild-index).
 
 ## `icml-papers search`
-
-One search:
 
 ```bash
 uv run icml-papers search "discrete diffusion language models"
 ```
 
-Interactive search:
-
-```bash
-uv run icml-papers search
-uv run icml-papers search --session
-```
-
-| Parameter | Purpose |
+| Option | Purpose |
 |---|---|
 | `-k, --top-k` | Maximum results returned |
 | `-d, --depth` | Fixed candidate-window depth |
 | `--area` | Filter by research area |
 | `--type` | Filter by paper type |
 | `--spotlight` | Return spotlight papers only |
-| `--session` | Enable session deduplication in interactive mode |
 
-A command-line query always runs one stateless search. `--session` affects only interactive mode without a query.
+Run without a query for interactive mode. Add `--session` there to suppress papers already returned during that terminal session.
 
 ## `icml-paper-search-mcp`
 
@@ -60,8 +50,8 @@ A command-line query always runs one stateless search. `--session` affects only 
 uv run icml-paper-search-mcp
 ```
 
-The command reads `Settings` and starts one Streamable HTTP process. By default it listens on `127.0.0.1:20441`, with MCP at `/mcp`.
+Starts one Streamable HTTP process. The default endpoint is `http://127.0.0.1:20441/mcp`.
 
 ## Exit codes
 
-`icml-papers` returns 0 on success. Public application errors, invalid parameters, and unmet build gates return 2 with redacted stderr text. Unknown exceptions are not part of the stable CLI contract.
+`icml-papers` returns 0 on success and 2 for handled application or input errors.

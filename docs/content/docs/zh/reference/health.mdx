@@ -1,21 +1,17 @@
 ---
 title: HTTP 与健康检查
-description: Streamable HTTP MCP 路径、liveness、readiness 与响应语义。
+description: MCP、存活检查和就绪检查接口。
 ---
-
-服务在同一 ASGI 应用中暴露 MCP 和两个普通 HTTP 健康路由。
 
 | 路径 | 方法 | 用途 |
 |---|---|---|
 | `/mcp` | MCP transport | Streamable HTTP 初始化、tools/list 与 tools/call |
 | `/health/live` | GET | 进程是否存活 |
-| `/health/ready` | GET | 本地 state/index 是否可服务 |
+| `/health/ready` | GET | SQLite、manifest 和 Milvus 是否可服务 |
 
-## `/mcp` 的内容协商
+## 为什么浏览器会返回 HTTP 406
 
-浏览器地址栏或只接受 JSON 的普通 GET 访问 `/mcp` 时，SDK 会返回 HTTP 406 和 `Client must accept text/event-stream`。这是 Streamable HTTP transport 的预期行为，不是 health 失败。
-
-MCP 客户端应通过 POST `initialize` 建立 transport，并声明 `Accept: application/json, text/event-stream`。服务返回的 `Mcp-Session-Id` 是 transport session id，与 `open_search_session` 返回的业务 capability session id 无关。
+`/mcp` 是 Streamable HTTP 协议接口，不是网页。浏览器 GET 通常会返回 HTTP 406 和 `Client must accept text/event-stream`。连接时使用 MCP 客户端；人工检查使用下面两个健康接口。
 
 ## Liveness
 
@@ -23,13 +19,7 @@ MCP 客户端应通过 POST `initialize` 建立 transport，并声明 `Accept: a
 curl -fsS http://127.0.0.1:20441/health/live
 ```
 
-成功返回 HTTP 200：
-
-```json
-{ "status": "ok" }
-```
-
-它不检查索引、SQLite、provider 或 key。
+返回 HTTP 200 和 `{"status":"ok"}`，表示进程存活。
 
 ## Readiness
 
@@ -37,15 +27,4 @@ curl -fsS http://127.0.0.1:20441/health/live
 curl -fsS http://127.0.0.1:20441/health/ready
 ```
 
-Ready 返回 HTTP 200 和 `{"status":"ready"}`；失败返回 HTTP 503 和 `{"status":"not_ready"}`。
-
-Readiness 会检查 runtime SQLite、原始语料、current manifest、Chroma collection/ID/维度和 FTS5 一致性，但不读取 DashScope key、不调用 provider。
-
-## 监控建议
-
-- 进程管理器使用 liveness 判断是否需要重启。
-- 负载入口使用 readiness 判断是否接收流量。
-- 不要因为 provider 暂时不可用把本地索引标记为 not ready。
-- 容器启动期允许 runtime index 复制和完整验证，配置合理的 `start_period`。
-
-公网代理探测需要发送被应用允许的 Host；否则 DNS rebinding 防护会拒绝请求。
+返回 HTTP 200 和 `{"status":"ready"}`，表示 SQLite、manifest、语料快照和 Milvus collection 一致；HTTP 503 表示尚未就绪。这个检查不会调用 DashScope。

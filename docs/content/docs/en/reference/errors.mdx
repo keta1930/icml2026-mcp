@@ -1,15 +1,15 @@
 ---
 title: Error Codes
-description: Stable, redacted MCP and CLI failure classes with retry guidance.
+description: Stable errors returned by MCP and CLI.
 ---
 
-Public failures use:
+Failures use:
 
 ```text
 error[code]: public short message
 ```
 
-Provider bodies and messages, keys, input, vectors, internal paths, and unknown exception details never enter public responses.
+Keys, provider responses, query text, vectors, internal paths, and unknown exception details are not returned.
 
 ## Stable errors
 
@@ -17,22 +17,13 @@ Provider bodies and messages, keys, input, vectors, internal paths, and unknown 
 |---|---:|---|
 | `invalid_request` | No | Invalid parameter, length, range, or required value |
 | `session_not_found` | No | Session is missing, expired, or closed |
-| `session_capacity_reached` | Yes | Active-session limit reached |
+| `session_capacity_reached` | Later | Active-session limit reached |
 | `rate_limited` | Yes | Source or global rate/count limit reached |
-| `server_busy` | Yes | Admission or worker wait is full or timed out |
-| `budget_exhausted` | No | Daily or monthly online Token budget exhausted |
-| `embedding_unavailable` | Depends on subclass | Transient, configuration, or protocol provider failure |
+| `server_busy` | Yes | The service queue is full or timed out |
+| `embedding_unavailable` | Sometimes | DashScope is unavailable, misconfigured, or returned an unusable response |
 | `embedding_quota_exhausted` | No | DashScope free quota or account balance exhausted |
 | `index_unavailable` | No | Local index missing, damaged, or contract-mismatched |
+| `index_build_limit_exceeded` | No | Explicit index-build input limit reached |
 | `internal_error` | No | Unknown service error; details stay behind the safe log boundary |
 
-## Retry guidance
-
-- `rate_limited`: back off; do not replay concurrently.
-- `server_busy`: reduce concurrency and wait for the queue to drain.
-- Transient `embedding_unavailable`: the server has already retried within bounds; use a longer client backoff.
-- `budget_exhausted`: wait for the UTC day/month boundary or an administrator budget change.
-- `embedding_quota_exhausted`: inspect DashScope quota, identity verification, and billing.
-- `index_unavailable`: an administrator must inspect, rebuild, or restore the index; client retries usually do not help.
-
-Unknown Python exceptions never return `str(exc)`. Server logs record only a public code and exception type.
+Back off for `rate_limited`, `server_busy`, or a temporary `embedding_unavailable`. Quota, index, configuration, and invalid-request errors require the stated condition to be fixed before retrying.

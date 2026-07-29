@@ -1,51 +1,17 @@
 ---
-title: 容量与并发
-description: 评估 25–40 名间歇用户的默认边界，并安全调节本地与 provider 并发。
+title: 容量
+description: 公共部署的默认限制。
 ---
 
-默认配置面向约 25–40 名间歇调用者。它不是 40 个持续占满的并行 search worker；匿名请求通过限流、admission 和分层 semaphore 收敛。
-
-## 默认边界
-
-| 项目 | 默认值 |
+| 限制 | 默认值 |
 |---|---:|
-| 每 IP 搜索速率 | 6 次/分钟，突发 3 |
-| 每 IP 每 UTC 日 | 200 次搜索 |
-| 每 IP 创建 session | 3 次/分钟，突发 2，每日 20 |
-| 全局搜索速率 | 120 次/分钟 |
-| active + waiting | 64 |
-| 已 admission 等待 | 10 秒 |
-| DashScope 并发 | 4 |
-| Chroma 并发 | 2 |
-| 在线日/月 Token | 500,000 / 10,000,000 |
-| 活跃 session | 256 |
+| 活跃会话 | 4,096 |
+| 搜索队列 | 512 |
+| DashScope 调用 | 64 并发 |
+| Milvus 调用 | 32 并发 |
+| 单 IP | 600 请求/分钟，burst 100 |
+| 应用全局速率 | 6,000 请求/分钟 |
+| 供应商速率 | 24,000 请求/分钟 |
+| 供应商输入 | 1,000,000 token/分钟 |
 
-## 三类瓶颈
-
-1. **Provider**：网络延迟、账户速率和 Token 额度。
-2. **本地检索**：Chroma 线程安全、CPU、内存和磁盘延迟。
-3. **State**：SQLite 写竞争、session 容量和 WAL 磁盘。
-
-相同 query 的并发 cache miss 会 single-flight 合并为一次 provider 调用，因此命中率会显著改变实际容量。
-
-## 调优顺序
-
-先观察 provider latency、本地 search latency、队列等待、`server_busy`、cache hit 和 SQLite busy，再只调整对应边界：
-
-- Provider 空闲而队列高：小步增加 provider concurrency。
-- Chroma 延迟快速上升：保持或降低 Chroma concurrency。
-- SQLite busy：缩短事务或降低并行状态写，不先增加 timeout 掩盖问题。
-- 公共费用高：降低 IP/global rate 或 Token budget，提高 cache TTL。
-- Session 容量高：缩短 TTL 或要求客户端及时 close，不随机淘汰活跃会话。
-
-每次只改变一组参数，并重新运行混合并发测试。不要用多个应用 worker 共享 Chroma 目录扩容。
-
-## 尚未覆盖的 transport 风险
-
-现有 40-client 混合测试覆盖合规的应用层 search/status 调用，不证明服务可以无限承受无效 transport 流量。锁定的 MCP SDK 可能在无 session 请求完成 header 校验前分配 transport，且当前没有 idle timeout；浏览器、扫描器或中断客户端可能留下未发送 DELETE 的 abandoned transport session。
-
-这是已确认但尚未修复的风险。不要把应用层并发测试表述成对这类流量的容量保证。后续需要单独评估分配前 ASGI 校验、SDK timeout/upgrade 能力和有界资源回收测试。
-
-## 磁盘规划
-
-Canonical index 与 runtime copy 会同时存在。发布新 generation 时还会短暂保留旧 runtime，因此生产 state 空间至少按两个 runtime index 加 SQLite/WAL 与文件系统余量规划。
+这些默认值面向约 25–40 名同时使用、查询较短的用户。Nginx、应用和供应商用量是三层独立控制。继续提高限制前，应观察队列等待、供应商延迟、Milvus 延迟、SQLite 锁等待和内存占用。

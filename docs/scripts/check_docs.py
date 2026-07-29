@@ -10,7 +10,7 @@ DOCS_ROOT = Path(__file__).resolve().parents[1]
 CONTENT = DOCS_ROOT / "content" / "docs"
 GENERATED = DOCS_ROOT / "generated"
 LANGUAGES = ("en", "zh")
-EXPECTED_PAGE_COUNT = 24
+EXPECTED_PAGE_COUNT = 21
 EXPECTED_INCLUDES = {
     Path("reference/configuration.mdx"): "configuration.mdx",
     Path("reference/mcp-tools.mdx"): "mcp-tools.mdx",
@@ -72,7 +72,9 @@ def _validate_navigation(
             errors.append(f"{meta_path.relative_to(DOCS_ROOT)}: invalid pages array")
             continue
         if len(entries) != len(set(entries)):
-            errors.append(f"{meta_path.relative_to(DOCS_ROOT)}: duplicate navigation entry")
+            errors.append(
+                f"{meta_path.relative_to(DOCS_ROOT)}: duplicate navigation entry"
+            )
         metadata[relative_meta] = entries
         folder = relative_meta.parent
         for entry in entries:
@@ -111,9 +113,7 @@ def main() -> int:
     route_sets: dict[str, set[str]] = {}
     for language in LANGUAGES:
         locale_root = CONTENT / language
-        pages = {
-            path.relative_to(locale_root) for path in locale_root.rglob("*.mdx")
-        }
+        pages = {path.relative_to(locale_root) for path in locale_root.rglob("*.mdx")}
         page_sets[language] = pages
         route_sets[language] = {_page_route(language, path) for path in pages}
         if len(pages) != EXPECTED_PAGE_COUNT:
@@ -135,17 +135,22 @@ def main() -> int:
             ):
                 errors.append(f"{display_path}: missing title/description frontmatter")
             if DEEP_HEADING.search(text):
-                errors.append(f"{display_path}: headings deeper than level 3 are forbidden")
+                errors.append(
+                    f"{display_path}: headings deeper than level 3 are forbidden"
+                )
 
             for raw_target in LINK.findall(text):
                 target = raw_target.strip().strip("<>")
                 route = _normalize_internal_route(target)
                 if route == "/docs" or route.startswith("/docs/"):
-                    errors.append(f"{display_path}: legacy unlocalized link {target}")
+                    errors.append(f"{display_path}: unlocalized link {target}")
                     continue
-                if route.startswith("/en/docs") or route.startswith("/zh/docs"):
+                if route.startswith(("/en/docs", "/zh/docs")):
                     expected_prefix = f"/{language}/docs"
-                    if not (route == expected_prefix or route.startswith(expected_prefix + "/")):
+                    if not (
+                        route == expected_prefix
+                        or route.startswith(expected_prefix + "/")
+                    ):
                         errors.append(f"{display_path}: cross-locale link {target}")
                     elif route not in route_sets[language]:
                         errors.append(f"{display_path}: broken internal link {target}")
@@ -170,7 +175,9 @@ def main() -> int:
             f"locale page parity failed: en_only={english_only}, zh_only={chinese_only}"
         )
     if metadata_sets.get("en") != metadata_sets.get("zh"):
-        errors.append("locale navigation parity failed: meta.json paths or pages differ")
+        errors.append(
+            "locale navigation parity failed: meta.json paths or pages differ"
+        )
 
     if errors:
         raise SystemExit("\n".join(errors))

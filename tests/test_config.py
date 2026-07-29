@@ -6,7 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from icml_paper_search.config import Settings
-from icml_paper_search.errors import EmbeddingConfigurationError, public_error_text
+from icml_paper_search.domain.errors import (
+    EmbeddingConfigurationError,
+    public_error_text,
+)
 
 
 def test_open_source_defaults_are_local_and_bounded():
@@ -15,14 +18,14 @@ def test_open_source_defaults_are_local_and_bounded():
     assert settings.embedding_model == "qwen3.7-text-embedding"
     assert settings.embedding_dim == 1024
     assert settings.embedding_batch_size == 20
-    assert settings.provider_concurrency == 4
-    assert settings.chroma_concurrency == 2
-    assert settings.max_sessions == 256
-    assert settings.ip_session_open_rate_per_minute == 3
-    assert settings.ip_session_open_burst == 2
-    assert settings.ip_session_opens_per_day == 20
+    assert settings.milvus_uri == "http://127.0.0.1:19530"
+    assert settings.provider_concurrency == 64
+    assert settings.milvus_concurrency == 32
+    assert settings.max_sessions == 4096
+    assert settings.provider_requests_per_minute == 24_000
+    assert settings.provider_tokens_per_minute == 1_000_000
+    assert settings.ip_rate_per_minute == 600
     assert all("agent4sci.com" not in host for host in settings.allowed_hosts)
-    assert "milvus" not in repr(settings).lower()
 
 
 def test_secret_file_takes_precedence(tmp_path):
@@ -53,10 +56,11 @@ def test_missing_secret_fails_closed_without_path_or_value(tmp_path):
 @pytest.mark.parametrize(
     "override",
     [
-        {"dense_weight": 0.9, "bm25_weight": 0.2},
         {"embedding_batch_size": 21},
         {"embedding_dim": 768},
-        {"daily_token_budget": 100, "monthly_token_budget": 99},
+        {"milvus_uri": "tcp://127.0.0.1:19530"},
+        {"milvus_collection_prefix": "invalid-prefix"},
+        {"global_rate_per_minute": 24_001},
         {
             "ip_session_open_rate_per_minute": 2,
             "ip_session_open_burst": 3,

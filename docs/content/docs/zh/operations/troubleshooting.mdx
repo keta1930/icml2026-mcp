@@ -1,64 +1,26 @@
 ---
-title: 排障
-description: 从健康检查、索引、provider、限流和代理层快速定位常见失败。
+title: 故障排查
+description: 常见的启动和连接问题。
 ---
 
-先判断问题发生在进程、本地索引、provider，还是公共治理边界。
+## `Not Acceptable: Client must accept text/event-stream`
 
-```mermaid
-flowchart TD
-    A[请求失败] --> B{live 200?}
-    B -->|否| C[进程 / 容器 / TLS]
-    B -->|是| D{ready 200?}
-    D -->|否| E[本地 state / index / manifest]
-    D -->|是| F{错误码}
-    F -->|embedding_*| G[DashScope 配置 / 额度 / 网络]
-    F -->|rate_limited / server_busy| H[限流 / admission / 并发]
-    F -->|session_not_found| I[capability / TTL / close]
-    F -->|invalid_request| J[参数与 schema]
-```
-
-## `index_unavailable` 或 not ready
+`/mcp` 是 Streamable HTTP MCP 端点，不是网页。浏览器普通请求没有携带所需的 `Accept` header，因此返回这个错误是正常的。应在 MCP 客户端中添加该地址。只检查传输层时可以使用：
 
 ```bash
-uv run icml-papers info
-uv run icml-papers build
+curl -i -H 'Accept: text/event-stream' \
+  https://icml.agent4sci.com:20441/mcp
 ```
 
-检查 `current`、manifest、原始语料 hash、Chroma/FTS5 记录数和文件权限。默认 build 是安全 preflight；确认原因后再决定重建或恢复。
+## Readiness 返回 503
 
-## `embedding_unavailable`
+检查 Milvus 是否健康、`current.json` 是否存在，以及对应 collection 是否存在：
 
-检查 key 是否配置、secret 文件是否可读、网络是否能访问北京地域 native API。401/普通 403 多为配置错误，429/408/5xx 属于瞬态故障；服务端已执行有界重试。
+```bash
+docker compose -f deploy/compose.yaml -f deploy/milvus.compose.yaml ps
+docker compose -f deploy/compose.yaml -f deploy/milvus.compose.yaml logs icml-mcp standalone
+```
 
-不要输出 provider body 或把 key 粘贴进诊断命令。
+## 搜索返回 embedding 错误
 
-## `embedding_quota_exhausted`
-
-检查 DashScope 免费额度、账户余额、实名认证和“免费额度用完即停”设置。该错误不可重试，继续并发调用只会制造噪声。
-
-## `rate_limited` / `server_busy`
-
-共享 NAT 可能让多个调用方共用 IP 额度。降低并发并退避；管理员检查 rate bucket、admission、worker latency 和 provider semaphore，不先扩大所有上限。
-
-## Session 异常
-
-`session_not_found` 同时隐藏错误 id、过期和已关闭状态。确认客户端保存的是业务 `session_id`，没有把 MCP transport session id 混入，也没有在 close 后继续使用。
-
-## Host / Origin 拒绝
-
-确认外部 URL、TLS 证书、代理 Host、`allowed_hosts` 与 `allowed_origins` 完全一致。只有启用 trusted proxy 且 peer 在可信网段时，应用才读取代理身份 header。
-
-## 浏览器访问 `/mcp` 返回 406
-
-`/mcp` 是 Streamable HTTP MCP endpoint，不是网页。浏览器或不合规客户端未声明 `Accept: text/event-stream` 时，SDK 返回 HTTP 406 和 `Client must accept text/event-stream` 是预期行为。
-
-- 人工检查进程：访问 `/health/live`。
-- 检查本地 index/state：访问 `/health/ready`。
-- 调用工具：使用支持 Streamable HTTP 的 MCP 客户端，让 SDK 完成 POST `initialize`、双媒体类型 `Accept`、`Mcp-Session-Id` 和后续请求。
-
-不要把 transport 的 `Mcp-Session-Id` 当作 `open_search_session` 返回的 capability session id。
-
-## 建库无法 resume
-
-比较 preflight build id、语料 hash、模型、维度和 batch size。存在 usage failure audit 或 completed ids 不是严格前缀时，保留审计后移走 staging，重新预检构建。
+确认应用容器可以读取 secret 文件，并且该 key 能在北京地域调用 `qwen3.7-text-embedding`。

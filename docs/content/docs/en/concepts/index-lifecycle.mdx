@@ -1,48 +1,15 @@
 ---
-title: Index Lifecycle
-description: Understand preflight, staging, checkpoints, validation, and atomic publication.
+title: Index contract
+description: What makes a Milvus collection ready to serve.
 ---
 
-Building the index calls a paid embedding provider. The project separates planning from execution and isolates incomplete versions in staging.
+The active index consists of a Milvus collection and `current.json`. The manifest records the corpus hashes, complete paper-ID fingerprint, embedding model and dimension, Milvus versions, metrics, and RRF fusion.
 
-## State machine
+Readiness verifies:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Preflight
-    Preflight --> Staging: --execute + Token cap
-    Staging --> Checkpoint: Complete batch written
-    Checkpoint --> Staging: Next batch
-    Checkpoint --> Validate: All papers complete
-    Validate --> Published: Fingerprints and indexes match
-    Published --> [*]: Switch current atomically
-    Staging --> Failed: provider / usage / IO failure
-    Failed --> Staging: Valid --resume
-```
+- the source files and manifest agree;
+- the collection has the required fields and BM25 function;
+- the COSINE and BM25 indexes have the required configuration;
+- the row count and complete paper-ID set match the 6,341-paper snapshot.
 
-## Preflight
-
-The default `icml-papers build` reads the corpus and computes a stable `build_id`, record count, corpus hash, and conservative Token upper bound. It does not read a key, contact the provider, or incur cost.
-
-## Staging and checkpoints
-
-Execution generates document embeddings in batches and advances the checkpoint only after a full Chroma write. The final batch shrinks to fit the remaining Token cap.
-
-If actual provider usage exceeds the reservation, the current batch is not written to the index or checkpoint. Staging records a failure audit without source text and refuses automatic resume.
-
-## Manifest
-
-A publishable version binds:
-
-- corpus-file hashes, corpus hash, and the complete paper-ID fingerprint;
-- embedding model, dimension, document text type, and batch contract;
-- Chroma metric, collection metadata, and complete ID set;
-- FTS5 tokenizer, counts, fusion weights, and `rrf_k`.
-
-Indexes missing current contract fields are not read in a degraded mode; rebuild them explicitly.
-
-## Atomic publication
-
-Only a version whose Chroma, FTS5, manifest, and source-corpus fingerprints all match enters `versions/<build_id>` and becomes `current`. A failed build never replaces the working version.
-
-See [Rebuild and upgrade the index](/en/docs/guides/rebuild-index).
+These checks do not call DashScope.

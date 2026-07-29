@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .config import Settings, get_settings
-from .models import Paper, SearchOutcome, SessionSummary
+from ..config import Settings, get_settings
+from ..domain.models import Paper, SearchOutcome, SessionSummary
 
 
 def format_search_outcome(
@@ -63,7 +63,7 @@ def _outcome_header(outcome: SearchOutcome) -> str:
     parts.append(f"new={len(outcome.hits)}")
     parts.append(f"duplicates_suppressed={outcome.duplicates_suppressed}")
     parts.append(f"window={outcome.candidates_examined}/{outcome.search_depth}")
-    parts.append("score=weighted-RRF[0,1]")
+    parts.append("score=RRF[0,1]")
     if outcome.session_id:
         parts.append(f"session_total={outcome.session_unique_total}")
         if outcome.consecutive_empty_rounds:
@@ -154,7 +154,11 @@ def _paper_lines(
 
     if paper.authors and cfg.max_authors_shown:
         shown = list(paper.authors[: cfg.max_authors_shown])
-        tail = f" ({len(paper.authors)} authors total)" if len(paper.authors) > len(shown) else ""
+        tail = (
+            f" ({len(paper.authors)} authors total)"
+            if len(paper.authors) > len(shown)
+            else ""
+        )
         lines.append("    " + ", ".join(shown) + tail)
 
     links = [f"id={paper.paper_id}", paper.openreview_url]
@@ -193,17 +197,16 @@ def format_session_summary(
 
     if summary.queries:
         lines.append("")
-        lines.append("Query history:")
+        lines.append("Search rounds:")
         for n, record in enumerate(summary.queries, 1):
             suffix = f", filters=({record.filters_desc})" if record.filters_desc else ""
-            query_label = record.query_summary or f"hash:{record.query_hash[:12]}"
             lines.append(
-                f"  {n}. {query_label} -> new={record.new_hits}, "
+                f"  {n}. hash:{record.query_hash[:12]} -> new={record.new_hits}, "
                 f"duplicates_suppressed={record.duplicates_suppressed}, "
                 f"candidates_examined={record.candidates_examined}{suffix}"
             )
         if summary.audit_truncated:
-            lines.append("  ... Query history was truncated at the safety limit.")
+            lines.append("  ... Search rounds were truncated at the safety limit.")
 
     if summary.papers:
         lines.append("")

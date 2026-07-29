@@ -4,7 +4,7 @@ import path from "node:path";
 const languages = ["en", "zh"];
 const contentRoot = path.resolve("content/docs");
 const outputRoot = path.resolve("out");
-const expectedPageCount = 24;
+const expectedPageCount = 21;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -80,7 +80,7 @@ await requireFile(path.join(outputRoot, "index.html"), "language entry page");
 const rootLlmsPath = path.join(outputRoot, "llms.txt");
 await requireFile(rootLlmsPath, "root AI index");
 await requireFile(path.join(outputRoot, "api/search"), "static search database");
-assert(!(await exists(path.join(outputRoot, "docs"))), "legacy /docs output must not exist");
+assert(!(await exists(path.join(outputRoot, "docs"))), "root /docs output must not exist");
 
 for (const language of languages) {
   await requireFile(path.join(outputRoot, language, "llms.txt"), `${language} AI index`);

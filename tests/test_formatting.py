@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from icml_paper_search.config import Settings
-from icml_paper_search.formatting import (
+from icml_paper_search.domain.models import (
+    Paper,
+    SearchFilters,
+    SearchHit,
+    SearchOutcome,
+)
+from icml_paper_search.search.formatting import (
     format_papers,
     format_search_outcome,
     format_session_summary,
 )
-from icml_paper_search.models import Paper, SearchFilters, SearchHit, SearchOutcome
 
 
 def test_outcome_header_reports_dedup_stats(service, settings):

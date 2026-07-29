@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Protocol, runtime_checkable
 
-from .config import Settings, get_settings
-from .errors import (
+from ..config import Settings, get_settings
+from ..domain.errors import (
     EmbeddingConfigurationError,
     EmbeddingProtocolError,
     EmbeddingQuotaExhausted,
@@ -140,7 +140,7 @@ class DashScopeEncoder:
                 raise EmbeddingUnavailable()
             try:
                 response = call(**payload, request_timeout=remaining)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - sanitize SDK/network failures
                 if not _is_network_error(exc):
                     raise EmbeddingUnavailable(retryable=False) from None
                 if attempt >= cfg.embedding_max_attempts:

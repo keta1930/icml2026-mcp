@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from icml_paper_search.errors import (
+from icml_paper_search.domain.errors import (
     AppError,
-    BudgetExhausted,
     EmbeddingConfigurationError,
     EmbeddingProtocolError,
     EmbeddingQuotaExhausted,
     EmbeddingRateLimited,
     EmbeddingUnavailable,
+    IndexBuildLimitExceeded,
     IndexUnavailable,
     InvalidRequestError,
     RateLimited,
@@ -49,18 +49,17 @@ from icml_paper_search.errors import (
             True,
             "Search session capacity has been reached. Please try again later.",
         ),
-        (RateLimited, "rate_limited", True, "Too many requests. Please try again later."),
+        (
+            RateLimited,
+            "rate_limited",
+            True,
+            "Too many requests. Please try again later.",
+        ),
         (
             ServerBusy,
             "server_busy",
             True,
             "The service is currently busy. Please try again later.",
-        ),
-        (
-            BudgetExhausted,
-            "budget_exhausted",
-            False,
-            "The daily or monthly search budget has been exhausted.",
         ),
         (
             EmbeddingUnavailable,
@@ -94,6 +93,12 @@ from icml_paper_search.errors import (
             "The text embedding service is temporarily unavailable.",
         ),
         (IndexUnavailable, "index_unavailable", False, "The paper index is not ready."),
+        (
+            IndexBuildLimitExceeded,
+            "index_build_limit_exceeded",
+            False,
+            "The index build reached its configured input-token limit.",
+        ),
     ],
 )
 def test_known_errors_expose_only_stable_contract(error_type, code, retryable, message):

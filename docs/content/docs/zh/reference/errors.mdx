@@ -1,15 +1,15 @@
 ---
 title: 错误码
-description: MCP 与 CLI 暴露的稳定、脱敏失败分类及重试建议。
+description: MCP 与 CLI 返回的稳定错误分类。
 ---
 
-公开失败文本统一为：
+失败文本格式为：
 
 ```text
 error[code]: 可公开的短消息
 ```
 
-Provider body、message、key、输入、向量、内部路径和未知异常细节不会进入公开响应。
+Key、云端响应、搜索内容、向量、内部路径和未知异常细节不会返回给调用方。
 
 ## 稳定错误
 
@@ -17,22 +17,13 @@ Provider body、message、key、输入、向量、内部路径和未知异常细
 |---|---:|---|
 | `invalid_request` | 否 | 参数、长度、范围或必填项无效 |
 | `session_not_found` | 否 | Session 不存在、过期或已关闭 |
-| `session_capacity_reached` | 是 | 活跃 session 达到上限 |
+| `session_capacity_reached` | 稍后 | 活跃会话达到上限 |
 | `rate_limited` | 是 | 来源或全局速率/次数达到上限 |
-| `server_busy` | 是 | Admission 或 worker 等待已满/超时 |
-| `budget_exhausted` | 否 | 当日或当月在线 Token 预算耗尽 |
-| `embedding_unavailable` | 视子类 | Provider 瞬态、配置或协议故障 |
+| `server_busy` | 是 | 服务队列已满或等待超时 |
+| `embedding_unavailable` | 有时 | DashScope 暂时不可用、配置错误或返回了无法处理的响应 |
 | `embedding_quota_exhausted` | 否 | DashScope 免费额度或账户余额耗尽 |
 | `index_unavailable` | 否 | 本地索引缺失、损坏或契约不一致 |
+| `index_build_limit_exceeded` | 否 | 达到明确设置的索引构建输入上限 |
 | `internal_error` | 否 | 未知服务错误，细节只留在安全日志边界 |
 
-## 重试策略
-
-- `rate_limited`：退避后重试，避免立即并发重放。
-- `server_busy`：缩小并发，等待当前队列释放。
-- 普通瞬态 `embedding_unavailable`：服务端已经执行有界重试，客户端再做较长退避。
-- `budget_exhausted`：等待 UTC 日/月窗口恢复或由管理员调整预算。
-- `embedding_quota_exhausted`：检查 DashScope 额度、实名认证和付费设置。
-- `index_unavailable`：管理员运行 `info`、重建或恢复索引；客户端重试通常无效。
-
-未知 Python 异常不会把 `str(exc)` 返回给调用方。服务端日志也只记录公开 code 和异常类型。
+遇到 `rate_limited`、`server_busy` 或短暂的 `embedding_unavailable` 时退避后重试。额度、索引、配置和参数错误需要先解决对应问题。

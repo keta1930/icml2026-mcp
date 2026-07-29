@@ -1,33 +1,22 @@
 ---
 title: MCP Tools
-description: Generated parameter reference and calling semantics for the six public MCP tools.
+description: Generated parameters for the six public MCP tools.
 ---
 
-The parameter table is generated from the FastMCP schema by `docs/scripts/generate_reference.py`. A documentation build refreshes it after a tool signature or Pydantic `Field` changes.
+MCP clients receive these schemas directly from the server. The table is generated from the same source.
 
-## Calling contract
+## Behavior
 
-- All tools are async MCP tools; `Context` is excluded from the public schema.
-- Results are compact text content intended to enter agent context directly.
-- Business failures also return text in the form `error[code]: message`.
-- A business `session_id` is not an MCP transport session ID.
-- `search_papers` is stateless when no `session_id` is supplied.
-
-## Typical sequence
-
-```text
-open_search_session -> search_papers (repeated)
-  -> search_session_status -> close_search_session
-```
-
-`get_papers` can run independently. With a session, papers actually found are marked as seen atomically. Call `list_paper_areas` before search to discover valid filter values.
+- Results and failures are compact English text.
+- A search without `session_id` is stateless.
+- Within a search session, returned papers are recorded and omitted from later results.
 
 ## Generated parameters
 
 <include>../../../../generated/en/mcp-tools.mdx</include>
 
-## Related semantics
+## Related
 
-- Fixed windows and score: [Hybrid search](/en/docs/concepts/hybrid-search)
-- Session atomicity: [Capability Sessions](/en/docs/concepts/sessions)
+- Ranking behavior: [Retrieval](/en/docs/concepts/hybrid-search)
+- Session behavior: [Search Sessions](/en/docs/concepts/sessions)
 - Stable failure classes: [Error Codes](/en/docs/reference/errors)

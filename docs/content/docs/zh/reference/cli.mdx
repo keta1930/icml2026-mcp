@@ -1,9 +1,9 @@
 ---
 title: CLI
-description: icml-papers 与 icml-paper-search-mcp 命令、参数和退出语义。
+description: 检查、构建、搜索和启动服务的命令。
 ---
 
-项目安装两个 console scripts：`icml-papers` 管理索引与本地检索，`icml-paper-search-mcp` 启动 Streamable HTTP 服务。
+项目提供两个命令：`icml-papers` 用于索引和本地测试，`icml-paper-search-mcp` 用于启动 MCP 服务。
 
 ## `icml-papers info`
 
@@ -11,7 +11,7 @@ description: icml-papers 与 icml-paper-search-mcp 命令、参数和退出语�
 uv run icml-papers info
 ```
 
-输出数据目录、state 路径、embedding 契约、RRF 参数、当前版本和语料统计。它只检查 key 是否配置，不读取 secret，也不访问 provider。
+输出 Milvus 地址、当前 collection、模型、路径和语料统计。这个命令不会调用 DashScope。
 
 ## `icml-papers build`
 
@@ -20,39 +20,29 @@ uv run icml-papers build
 uv run icml-papers build --execute --max-input-tokens <CAP>
 ```
 
-| 参数 | 作用 |
+| 选项 | 作用 |
 |---|---|
 | `--execute` | 确认发起 DashScope 调用并写索引 |
-| `--max-input-tokens N` | 本次建库 Token 硬上限；execute 时必填 |
+| `--max-input-tokens N` | 输入 token 上限；execute 时必填 |
 | `--resume` | 从匹配的完整 batch checkpoint 恢复 |
 
-默认模式是零云 preflight。缺少 execute 或正数 cap 时不会付费建库。
+第一条命令只做离线预检；第二条命令调用 DashScope 并写入 Milvus collection。参见[构建索引](/zh/docs/guides/rebuild-index)。
 
 ## `icml-papers search`
-
-单次搜索：
 
 ```bash
 uv run icml-papers search "discrete diffusion language models"
 ```
 
-交互搜索：
-
-```bash
-uv run icml-papers search
-uv run icml-papers search --session
-```
-
-| 参数 | 作用 |
+| 选项 | 作用 |
 |---|---|
 | `-k, --top-k` | 返回条数上限 |
 | `-d, --depth` | 固定候选窗口深度 |
 | `--area` | 按领域过滤 |
 | `--type` | 按论文类型过滤 |
 | `--spotlight` | 只返回 spotlight |
-| `--session` | 交互模式启用 session 去重 |
 
-命令行带 query 时始终是单次无状态搜索；`--session` 只影响无 query 的交互模式。
+不传 query 时进入交互模式；在交互模式加 `--session`，本次终端会话中已经返回的论文不会再次出现。
 
 ## `icml-paper-search-mcp`
 
@@ -60,8 +50,8 @@ uv run icml-papers search --session
 uv run icml-paper-search-mcp
 ```
 
-读取 `Settings`，启动单进程 Streamable HTTP 服务。默认监听 `127.0.0.1:20441`，MCP 路径是 `/mcp`。
+启动一个 Streamable HTTP 进程。默认地址是 `http://127.0.0.1:20441/mcp`。
 
 ## 退出码
 
-`icml-papers` 成功返回 0；公开应用错误、无效参数或不满足建库门槛返回 2，并只向 stderr 写脱敏文本。未知异常不属于稳定 CLI 契约。
+`icml-papers` 成功时返回 0，已处理的应用或输入错误返回 2。

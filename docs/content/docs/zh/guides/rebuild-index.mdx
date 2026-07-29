@@ -1,50 +1,20 @@
 ---
-title: 重建与升级索引
-description: 安全预检、恢复中断构建、发布新版本并处理不兼容旧索引。
+title: 构建索引
+description: 创建并验证 Milvus 论文 collection。
 ---
 
-索引构建会产生云调用费用。任何重建都从 preflight 开始，并把已有 `current` 当作必须保护的可用版本。
-
-## 标准重建
+预检只读取本地语料，显示论文数量和保守的输入上限，不会调用 DashScope：
 
 ```bash
 uv run icml-papers build
-uv run icml-papers build --execute --max-input-tokens <TOKEN_CAP>
 ```
 
-把 preflight 输出的 `estimated_input_tokens` 作为 cap 的最低参考。Cap 是硬边界，不是费用预测；实际 usage 由 provider 返回。
-
-## 恢复中断
+确定输入上限后再执行构建：
 
 ```bash
-uv run icml-papers build --execute \
-  --max-input-tokens <TOKEN_CAP> --resume
+uv run icml-papers build --execute --max-input-tokens 10000000
 ```
 
-Resume 要求 build id、语料 hash、模型、维度、batch size 完全一致，且 completed ids 是当前语料严格前缀。带 usage contract failure audit 的 staging 不允许自动恢复。
+命令按完整批次写入数据，检查 Milvus schema、索引、行数、论文 ID、向量维度和一次混合检索，最后写入 `.data/index/current.json`。
 
-## 处理旧索引
-
-缺少当前 manifest 或 paper-id 指纹的索引不兼容读取。停止服务后先把旧目录移作备份，再重新构建：
-
-```bash
-mv .data/index .data/index.pre-fingerprint
-uv run icml-papers build
-```
-
-确认新 preflight 后再执行付费构建。不要通过关闭 readiness 或伪造 manifest 强行使用旧索引。
-
-## 发布验证
-
-新版本切换后检查：
-
-```bash
-uv run icml-papers info
-curl -fsS http://127.0.0.1:20441/health/ready
-```
-
-容器部署中，`build-index` 写 canonical index；服务重启后入口会把 `current` 对应版本复制为可写 `runtime-index`。不要直接修改服务正在使用的副本。
-
-## 回滚思路
-
-版本目录是不可分割单元。回滚应停止服务，把 `current` 切回一个完整、已验证的旧版本，再启动并执行 readiness；不能只替换 Chroma、FTS5 或 manifest 中的单个文件。
+普通中断留下有效 checkpoint 时可以加 `--resume`。如果失败原因是供应商用量超过构建上限，应先检查原因，再不带 `--resume` 重新执行。

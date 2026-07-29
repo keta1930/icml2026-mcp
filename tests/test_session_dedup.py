@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from icml_paper_search.errors import InvalidRequestError, SessionCapacityReached
-from icml_paper_search.models import SearchFilters
-from icml_paper_search.sessions import SessionNotFoundError
+from icml_paper_search.domain.errors import (
+    InvalidRequestError,
+    SessionCapacityReached,
+    SessionNotFoundError,
+)
+from icml_paper_search.domain.models import SearchFilters
 
 
 def test_repeated_query_returns_no_duplicates(service):
@@ -155,7 +158,7 @@ def test_get_papers_skips_unknown_ids(service):
 
 
 def test_close_session_returns_full_summary(service):
-    """Return query history and papers on close, then invalidate the capability."""
+    """Return search rounds and papers on close, then invalidate the capability."""
     session_id = service.open_session(label="wrap").session_id
     outcome = service.search("q", session_id=session_id, top_k=5)
 
@@ -164,7 +167,6 @@ def test_close_session_returns_full_summary(service):
     assert summary.unique_papers == len(outcome.hits)
     assert len(summary.papers) == len(outcome.hits)
     assert len(summary.queries[0].query_hash) == 64
-    assert summary.queries[0].query_summary is None
 
     with pytest.raises(SessionNotFoundError):
         service.search("q", session_id=session_id)
@@ -195,7 +197,10 @@ def test_empty_query_rejected(service):
 
 def test_session_capacity_rejects_without_cross_user_eviction(service, settings):
     """Reject capacity overflow without evicting another caller's active capability."""
-    ids = [service.open_session(label=str(n)).session_id for n in range(settings.max_sessions)]
+    ids = [
+        service.open_session(label=str(n)).session_id
+        for n in range(settings.max_sessions)
+    ]
     with pytest.raises(SessionCapacityReached):
         service.open_session(label="overflow")
     assert service.session_status(ids[0]).session_id == ids[0]

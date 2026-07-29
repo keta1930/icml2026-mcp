@@ -18,7 +18,6 @@ __pycache__
 **/*.sqlite-shm
 **/*.checkpoint
 **/*.staging
-**/chroma
 **/secrets
 **/dashscope_api_key*
 *.key

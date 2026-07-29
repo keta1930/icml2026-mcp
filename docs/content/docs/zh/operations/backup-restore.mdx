@@ -1,47 +1,12 @@
 ---
-title: 备份与恢复
-description: 对 canonical index 与 runtime state 执行一致的冷备、恢复和 readiness 校验。
+title: 备份
+description: 自建实例需要保存的数据。
 ---
 
-权威索引和 runtime state 必须作为一组冷备。Chroma 与 SQLite 都可能有活动文件，复制前先停止 MCP 应用。
+需要备份以下 Docker volume：
 
-## 权威数据
+- `etcd-data`、`minio-data` 和 `milvus-data`：Milvus collection；
+- `icml-index`：`current.json` 和构建 checkpoint；
+- `icml-state`：会话、限流和 embedding 缓存。
 
-| 数据 | 是否备份 |
-|---|---:|
-| `.data/index` / canonical index mount | 是 |
-| `.data/state/runtime.sqlite3` 及 WAL/SHM | 是 |
-| `state/runtime-index` | 否，可由 canonical current 重建 |
-| 容器 tmpfs secret | 否，从 secret manager 恢复 |
-
-## 本地冷备
-
-停止服务后执行：
-
-```bash
-tar -C .data --exclude='state/runtime-index' \
-  -czf icml-paper-search-backup.tgz index state
-```
-
-记录应用版本、备份时间和 current build id。不要只备份 Chroma 或只复制主 SQLite 文件而遗漏 WAL。
-
-## 恢复
-
-1. 保持应用停止。
-2. 恢复原目录结构和文件权限。
-3. 恢复与索引对应的应用版本和配置。
-4. 先运行本地校验，再启动服务。
-
-```bash
-uv run icml-papers info
-uv run icml-paper-search-mcp
-curl -fsS http://127.0.0.1:20441/health/ready
-```
-
-Manifest 的模型、维度、语料 hash、paper-id 指纹或融合参数不一致时 readiness 会拒绝服务。不要关闭校验绕过恢复错误。
-
-## 容器恢复
-
-同时恢复 canonical index bind mount 与 state bind mount，排除派生 `runtime-index`。启动时入口会从 canonical `current` 重建副本并执行完整零云校验。
-
-定期在隔离环境演练恢复；没有验证过的备份不能视为可用恢复点。
+备份 `icml-state` 前先停止 MCP 应用。Milvus 备份需要同时停止 Milvus、etcd 和 MinIO，或使用 Milvus 支持的备份方法。恢复时应把三个 Milvus volume 作为一组，再恢复 manifest 和运行状态 volume。

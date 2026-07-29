@@ -1,42 +1,10 @@
 ---
-title: Capability Session
-description: 理解不可枚举 session、原子去重、过期和隐私边界。
+title: 搜索会话
+description: 在一组相关检索中避免重复论文。
 ---
 
-Session 是一个持久化去重集合，不是用户账号或聊天记录。调用方持有的随机 `session_id` 同时充当访问能力。
+搜索会话会记录已经返回过的论文。后续检索复用同一个 `session_id` 时，这些论文会被排除；通过 `get_papers` 读取并记录的论文也一样。
 
-## Capability 模型
+会话不是必需的。不传 `session_id` 时检索不保存状态，不同会话之间也不共享记录。
 
-- raw id 至少包含 256-bit 随机性。
-- raw id 只在创建时返回，服务端数据库只保存 SHA-256 摘要。
-- 拿到 raw id 的人可以访问对应 session。
-- 匿名接口不能列举、恢复或搜索其他 session。
-- 关闭、过期和不存在统一返回 `session_not_found`。
-
-因此 `session_id` 应像临时凭据一样处理，不进入日志、issue、截图或公开 prompt。
-
-## 原子去重
-
-同一 session 可能被多个请求同时使用。实现不会先读 seen 集合、再异步写回；它在一个 SQLite 事务中完成：
-
-```mermaid
-flowchart LR
-    A[候选论文] --> B[BEGIN IMMEDIATE]
-    B --> C[过滤 seen]
-    C --> D[选择 wanted 条]
-    D --> E[写 seen + round]
-    E --> F[COMMIT]
-    F --> G[返回实际提交项]
-```
-
-只有最终返回给调用方的论文才登记为 seen。`get_papers` 只有在传入 session 时才登记实际找到的论文。
-
-## 生命周期
-
-默认空闲 24 小时过期。活动 session、总轮次、seen 数、审计记录和关闭汇总都有上限；容量满时拒绝新建，不会淘汰其他调用方仍活跃的 session。
-
-连续空轮在出现新命中后归零；达到配置阈值后 session 标记为 `exhausted`，但调用方仍可换词或调整窗口继续判断。
-
-## 持久化内容
-
-Runtime SQLite 保存 capability hash、标签、时间、seen paper id、有限轮次统计和 query hash。它不保存原始 IP、原始 query 或 raw session id。标签按原样保存，所以标签也不能包含敏感内容。
+Session ID 是私有访问凭证。服务只保存它的哈希，不能列出或恢复原值。会话会在长时间未使用后过期，并限制检索轮数和记录数量。
