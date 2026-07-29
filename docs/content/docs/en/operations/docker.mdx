@@ -1,0 +1,61 @@
+---
+title: Docker Deployment
+description: Build an immutable image, create the index explicitly, and start one process with a read-only canonical index.
+---
+
+The production reference combines an explicit index-build job, one MCP application process, and an Nginx TLS sidecar. The image contains the application and corpus, not the key, built index, or runtime state.
+
+## Build and smoke-test
+
+```bash
+docker build --build-arg VCS_REF=<git-sha> \
+  -t icml-paper-search-mcp:<git-sha> .
+sh deploy/smoke-container.sh icml-paper-search-mcp:<git-sha>
+```
+
+The smoke test verifies both console scripts, the fixed virtual-environment shebang, non-root UID/GID, entrypoint paths, and runtime secret permissions.
+
+## Prepare the host
+
+Create separate canonical-index and state directories plus a read-only secret file. A deployment administrator must create these paths explicitly; Compose must not silently create incorrect mounts.
+
+| Variable | Purpose |
+|---|---|
+| `ICML_MCP_IMAGE` | Immutable git-SHA image tag |
+| `ICML_PAPERS_INDEX_DIR` | Canonical-index bind mount |
+| `ICML_PAPERS_STATE_DIR` | Runtime-state bind mount |
+| `ICML_PAPERS_DASHSCOPE_SECRET_FILE` | Host secret file |
+| `ICML_PAPERS_BUILD_MAX_INPUT_TOKENS` | Build hard cap |
+| `ICML_PAPERS_TRUSTED_PROXY_NETWORKS` | Actual TLS-sidecar backend network |
+
+## Build the index explicitly
+
+```bash
+docker compose -f deploy/compose.yaml \
+  --profile build run --rm build-index
+```
+
+`build-index` writes directly to the canonical index. Do not run it while the application has the same directory open.
+
+## Start the service
+
+```bash
+docker compose -f deploy/compose.yaml up -d icml-mcp icml-mcp-tls
+docker compose -f deploy/compose.yaml ps
+```
+
+The application mounts the canonical index read-only. Under a state lock, the entrypoint validates `current`, copies the complete version into a unique generation, and atomically publishes writable `runtime-index`. The application and readiness open only that copy.
+
+## Replace before production
+
+- Example domains in `deploy/compose.yaml` and `deploy/nginx.conf`.
+- TLS certificate paths and the external port.
+- Exact `allowed_hosts` and `allowed_origins`.
+- The TLS sidecar's actual backend CIDR.
+- Image registry, backup paths, and log collection.
+
+Docker assigns the Compose network dynamically. Do not restore a fixed subnet. `trusted_proxy_networks` is an application trust boundary, not network allocation.
+
+## Update
+
+Complete image smoke tests and index validation before publishing a new image or index. Restarting rebuilds the runtime copy, so state storage needs room for the previous generation, the new generation, and SQLite/WAL.

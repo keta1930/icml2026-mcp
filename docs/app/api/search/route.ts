@@ -5,7 +5,10 @@ import { source } from "@/lib/source";
 export const revalidate = false;
 
 export const { staticGET: GET } = createFromSource(source, {
-  tokenizer: createStableMandarinTokenizer(),
+  localeMap: {
+    en: "english",
+    zh: { tokenizer: createStableMandarinTokenizer() },
+  },
   search: {
     threshold: 0,
     tolerance: 0,

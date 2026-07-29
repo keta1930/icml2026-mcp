@@ -1,0 +1,58 @@
+---
+title: Configure MCP Clients
+description: Register the service in Claude Code and other Streamable HTTP clients.
+---
+
+The service exposes only Streamable HTTP MCP at `/mcp`. Health checks are regular HTTP routes, not MCP tools.
+
+## Claude Code
+
+Public instance:
+
+```bash
+claude mcp add --transport http icml-papers --scope user \
+  https://icml.agent4sci.com:20441/mcp
+```
+
+Local instance:
+
+```bash
+claude mcp add --transport http icml-papers --scope project \
+  http://127.0.0.1:20441/mcp
+```
+
+Use `user` scope across projects and `project` scope to confine a local service to one repository.
+
+## Generic JSON configuration
+
+```json
+{
+  "mcpServers": {
+    "icml-papers": {
+      "type": "http",
+      "url": "http://127.0.0.1:20441/mcp"
+    }
+  }
+}
+```
+
+The client must support Streamable HTTP. Do not use `/health/ready`, an Nginx upstream, or an internal container hostname as the MCP URL.
+
+`/mcp` is not a page to open directly. An ordinary GET without `Accept: text/event-stream` receives HTTP 406 and `Client must accept text/event-stream` from the SDK. A compatible client starts with POST `initialize`, sends `Accept: application/json, text/event-stream`, stores the returned `Mcp-Session-Id`, and completes initialization before calling tools.
+
+Use `/health/live` and `/health/ready` for manual or monitoring checks. Browser rendering of `/mcp` is not a service-health signal.
+
+## Behind a reverse proxy
+
+The public URL must match application `allowed_hosts`, `allowed_origins`, and the TLS certificate. The application trusts a proxy-provided source-IP header only when the peer belongs to `trusted_proxy_networks`.
+
+For Host or Origin rejection:
+
+1. Verify URL scheme, host, and port.
+2. Confirm that the proxy preserves Host.
+3. Add the exact external origin; do not use broad domain wildcards.
+4. Use `/health/live` to separate TLS/proxy issues from MCP initialization.
+
+## Two different sessions
+
+The transport session and the business `session_id` are separate. The protocol carries the former in `Mcp-Session-Id`; `open_search_session` returns the latter for paper deduplication. Do not interchange them.

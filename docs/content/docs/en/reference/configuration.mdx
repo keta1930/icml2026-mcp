@@ -1,0 +1,48 @@
+---
+title: Configuration
+description: ICML_PAPERS_ environment variables, defaults, combined constraints, and secret precedence.
+---
+
+Runtime configuration lives in `Settings`. A root `.env` overrides defaults, and every environment variable uses the `ICML_PAPERS_` prefix.
+
+## Secret
+
+Set either a direct key or a file:
+
+```dotenv
+ICML_PAPERS_DASHSCOPE_API_KEY=
+ICML_PAPERS_DASHSCOPE_API_KEY_FILE=/run/secrets/dashscope_api_key
+```
+
+The file takes precedence. For public or container deployment, prefer a read-only secret file. Keep keys out of images, Git, logs, exceptions, and command arguments.
+
+## Combined constraints
+
+- Dense and BM25 weights must sum to 1.
+- `qwen3.7-text-embedding` uses 1,024 dimensions.
+- Embedding batch size cannot exceed 20.
+- The monthly Token budget cannot be smaller than the daily budget.
+- `max_search_depth` cannot be smaller than `max_top_k`.
+- Burst cannot exceed the corresponding per-minute rate.
+- Trusted proxy mode requires at least one trusted network.
+- The DashScope base URL must be the Beijing-region HTTPS native API.
+- Allowed hosts and origins accept exact values, or `:*` only in the port position.
+
+Pydantic rejects invalid combinations before process startup.
+
+## JSON environment values
+
+Use JSON for tuple/list settings:
+
+```dotenv
+ICML_PAPERS_ALLOWED_HOSTS=["papers.example.com:443"]
+ICML_PAPERS_TRUSTED_PROXY_NETWORKS=["172.20.0.0/16"]
+```
+
+Production settings must use actual Host, Origin, and proxy networks rather than copied example domains or broad private ranges.
+
+## Generated field table
+
+The table comes from `Settings.model_json_schema()`. See root `.env.example` for grouped comments.
+
+<include>../../../../generated/en/configuration.mdx</include>

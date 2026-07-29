@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "@orama/orama";
+import { useMemo } from "react";
 import { useDocsSearch } from "fumadocs-core/search/client";
 import { oramaStaticClient } from "fumadocs-core/search/client/orama-static";
 import {
@@ -14,23 +15,31 @@ import {
   SearchDialogOverlay,
   type SharedProps,
 } from "fumadocs-ui/components/dialog/search";
+import { useI18n } from "fumadocs-ui/contexts/i18n";
 import { createStableMandarinTokenizer } from "@/lib/search-tokenizer";
 import { siteConfig } from "@/lib/site";
 
-const client = oramaStaticClient({
-  from: `${siteConfig.basePath}/api/search`,
-  initOrama: () =>
-    create({
-      schema: { _: "string" },
-      components: { tokenizer: createStableMandarinTokenizer() },
-    }),
-  search: {
-    threshold: 0,
-    tolerance: 0,
-  },
-});
-
 export default function StaticSearchDialog(props: SharedProps) {
+  const { locale = "en" } = useI18n();
+  const client = useMemo(
+    () =>
+      oramaStaticClient({
+        from: `${siteConfig.basePath}/api/search`,
+        locale,
+        initOrama: (databaseLocale) =>
+          databaseLocale === "zh"
+            ? create({
+                schema: { _: "string" },
+                components: { tokenizer: createStableMandarinTokenizer() },
+              })
+            : create({ schema: { _: "string" }, language: "english" }),
+        search: {
+          threshold: 0,
+          tolerance: 0,
+        },
+      }),
+    [locale],
+  );
   const { search, setSearch, query } = useDocsSearch({ client });
 
   return (

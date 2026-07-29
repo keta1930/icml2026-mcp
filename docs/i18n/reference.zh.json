@@ -1,0 +1,73 @@
+{
+  "labels": {
+    "parameter": "参数",
+    "type": "类型",
+    "required": "必填",
+    "default": "默认值",
+    "constraints": "约束",
+    "description": "说明",
+    "yes": "是",
+    "no": "否",
+    "no_parameters": "无参数",
+    "return_note": "返回 MCP 文本内容；失败时使用稳定的 `error[code]` 文本。",
+    "environment_variable": "环境变量",
+    "unset": "未设置",
+    "min_chars": "最少字符",
+    "max_chars": "最多字符",
+    "min_items": "最少条目",
+    "max_items": "最多条目"
+  },
+  "tools": {
+    "open_search_session": {
+      "title": "打开搜索会话",
+      "description": "创建不可枚举的 capability session，用于跨多轮搜索自动去重。",
+      "parameters": {
+        "label": "会话的可选主题标签。",
+        "default_top_k": "该会话每轮默认返回的结果数。"
+      }
+    },
+    "search_papers": {
+      "title": "搜索论文",
+      "description": "使用 Chroma 稠密检索与 SQLite BM25 加权 RRF 搜索 ICML 2026 论文；传入 `session_id` 时只返回该会话尚未见过的论文。",
+      "parameters": {
+        "query": "自然语言研究主题或方法。",
+        "session_id": "用于持久化去重的 capability session ID。",
+        "top_k": "最多返回的新论文数。",
+        "search_depth": "固定相关性窗口深度。",
+        "area": "研究领域过滤条件。",
+        "paper_type": "论文类型过滤条件。",
+        "spotlight_only": "是否只返回 spotlight 论文。",
+        "min_score": "归一化加权 RRF 分数下限。",
+        "include_abstract": "是否在结果中包含摘要预览。"
+      }
+    },
+    "close_search_session": {
+      "title": "关闭搜索会话",
+      "description": "关闭一个 capability session，并返回有界的搜索摘要。",
+      "parameters": {
+        "session_id": "要关闭的 capability session ID。"
+      }
+    },
+    "search_session_status": {
+      "title": "搜索会话状态",
+      "description": "通过 `session_id` 检查单个 capability session；匿名调用方不能枚举会话。",
+      "parameters": {
+        "session_id": "要检查的 capability session ID。",
+        "include_papers": "是否包含有界的论文标题列表。"
+      }
+    },
+    "get_papers": {
+      "title": "获取论文",
+      "description": "根据 OpenReview ID 获取完整摘要，并可在 capability session 中原子地将这些论文登记为已见。",
+      "parameters": {
+        "paper_ids": "OpenReview 论文 ID。",
+        "session_id": "在其中将返回论文原子登记为已见的 capability session。"
+      }
+    },
+    "list_paper_areas": {
+      "title": "列出论文领域",
+      "description": "列出可用的 `area` 和 `paper_type` 值及语料库计数。",
+      "parameters": {}
+    }
+  }
+}

@@ -4,12 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 20440",
+    "generate:source": "fumadocs-mdx",
     "generate:reference": "uv --project .. run python scripts/generate_reference.py",
     "check:reference": "uv --project .. run python scripts/generate_reference.py --check",
     "check:docs": "uv --project .. run python scripts/check_docs.py",
-    "build": "pnpm generate:reference && pnpm check:docs && next build && node scripts/export_markdown.mjs",
+    "check:export": "node scripts/check_export.mjs",
+    "build:site": "next build && node scripts/export_markdown.mjs && pnpm check:export",
+    "build": "pnpm check:reference && pnpm check:docs && pnpm typecheck && pnpm build:site",
     "start": "uv --project .. run python -m http.server 20440 --bind 127.0.0.1 --directory out",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "pnpm generate:source && tsc --noEmit"
   },
   "engines": {
     "node": ">=22"

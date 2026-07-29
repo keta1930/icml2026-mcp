@@ -1,0 +1,48 @@
+---
+title: Rebuild and Upgrade the Index
+description: Preflight safely, resume interrupted builds, publish a version, and replace incompatible indexes.
+---
+
+Index construction incurs cloud-call costs. Begin every rebuild with preflight and protect the existing `current` version as the working fallback.
+
+## Standard rebuild
+
+```bash
+uv run icml-papers build
+uv run icml-papers build --execute --max-input-tokens <TOKEN_CAP>
+```
+
+Use preflight `estimated_input_tokens` as the minimum reference for the cap. The cap is a hard boundary, not a price estimate; actual usage comes from the provider response.
+
+## Resume an interruption
+
+```bash
+uv run icml-papers build --execute \
+  --max-input-tokens <TOKEN_CAP> --resume
+```
+
+Resume requires an exact match on build ID, corpus hash, model, dimension, and batch size. Completed IDs must be a strict prefix of the current corpus. Staging with a usage-contract failure audit cannot resume automatically.
+
+## Replace an old index
+
+An index missing the current manifest or paper-ID fingerprint is incompatible. Stop the service, move the old directory aside, and rebuild:
+
+```bash
+mv .data/index .data/index.pre-fingerprint
+uv run icml-papers build
+```
+
+Review the new preflight before the paid build. Never disable readiness or forge a manifest to force an old index into service.
+
+## Validate publication
+
+```bash
+uv run icml-papers info
+curl -fsS http://127.0.0.1:20441/health/ready
+```
+
+In containers, `build-index` writes the canonical index. After restart, the entrypoint copies the `current` version to writable `runtime-index`. Do not edit the copy used by the service.
+
+## Rollback model
+
+A version directory is an indivisible unit. Stop the service, point `current` to a complete validated version, restart, and run readiness. Never replace only Chroma, FTS5, or one manifest file.

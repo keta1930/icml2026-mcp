@@ -1,0 +1,18 @@
+---
+title: Roadmap
+description: Improve retrieval robustness and extend the verified indexing contract to more open scholarly sources.
+---
+
+The current release focuses on ICML 2026. Long-term work follows two tracks while preserving explainable scores, bounded costs, and reproducible index lifecycles.
+
+## Retrieval robustness
+
+Build reproducible offline evaluation for query paraphrases, specialized terminology, filter combinations, and fixed retrieval windows. Improvements should make relevant papers more stable to discover without presenting weighted RRF score as a probability or cross-query metric.
+
+Evaluation should track retrieval quality together with latency, Token use, and session-deduplication behavior so robustness work cannot bypass cost and resource governance.
+
+## More open scholarly sources
+
+Expand beyond ICML to more open scholarly sources, including other major AI conferences. Each source must retain explicit provenance, venue/year isolation, complete paper-ID fingerprints, manifest contracts, and a reversible index lifecycle.
+
+Specific sources, schedules, and milestones will be chosen only after license, field-mapping, and quality checks. This roadmap does not promise an unverified venue list or release date.

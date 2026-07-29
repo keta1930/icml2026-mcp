@@ -1,0 +1,67 @@
+---
+title: CLI
+description: Commands, parameters, and exit semantics for icml-papers and icml-paper-search-mcp.
+---
+
+The project installs two console scripts: `icml-papers` manages indexes and local retrieval; `icml-paper-search-mcp` starts the Streamable HTTP service.
+
+## `icml-papers info`
+
+```bash
+uv run icml-papers info
+```
+
+The command prints data and state paths, embedding contract, RRF settings, current index version, and corpus statistics. It checks whether a key is configured without reading the secret or contacting the provider.
+
+## `icml-papers build`
+
+```bash
+uv run icml-papers build
+uv run icml-papers build --execute --max-input-tokens <CAP>
+```
+
+| Parameter | Purpose |
+|---|---|
+| `--execute` | Confirm DashScope calls and index writes |
+| `--max-input-tokens N` | Hard build Token cap; required with execute |
+| `--resume` | Resume from a matching complete-batch checkpoint |
+
+Default mode is a zero-cloud preflight. Without execute and a positive cap, no paid index build occurs.
+
+## `icml-papers search`
+
+One search:
+
+```bash
+uv run icml-papers search "discrete diffusion language models"
+```
+
+Interactive search:
+
+```bash
+uv run icml-papers search
+uv run icml-papers search --session
+```
+
+| Parameter | Purpose |
+|---|---|
+| `-k, --top-k` | Maximum results returned |
+| `-d, --depth` | Fixed candidate-window depth |
+| `--area` | Filter by research area |
+| `--type` | Filter by paper type |
+| `--spotlight` | Return spotlight papers only |
+| `--session` | Enable session deduplication in interactive mode |
+
+A command-line query always runs one stateless search. `--session` affects only interactive mode without a query.
+
+## `icml-paper-search-mcp`
+
+```bash
+uv run icml-paper-search-mcp
+```
+
+The command reads `Settings` and starts one Streamable HTTP process. By default it listens on `127.0.0.1:20441`, with MCP at `/mcp`.
+
+## Exit codes
+
+`icml-papers` returns 0 on success. Public application errors, invalid parameters, and unmet build gates return 2 with redacted stderr text. Unknown exceptions are not part of the stable CLI contract.

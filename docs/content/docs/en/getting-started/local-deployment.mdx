@@ -1,0 +1,78 @@
+---
+title: Local Deployment
+description: Configure the corpus index, DashScope embedding, and local Streamable HTTP MCP from scratch.
+---
+
+Self-hosting requires no Milvus, GPU, local model, or external database. You need Python 3.12+, uv, disk space, and a DashScope key with access to `qwen3.7-text-embedding`.
+
+## Install
+
+```bash
+uv sync
+cp .env.example .env
+```
+
+Set a direct key in `.env`, or use a read-only secret file:
+
+```dotenv
+ICML_PAPERS_DASHSCOPE_API_KEY=your-dashscope-api-key
+# ICML_PAPERS_DASHSCOPE_API_KEY_FILE=/absolute/path/to/key
+```
+
+The file takes precedence when both are present. Git ignores `.env`, but you must still restrict its permissions and keep keys out of logs and shell history.
+
+## Zero-cloud preflight
+
+```bash
+uv run icml-papers info
+uv run icml-papers build
+```
+
+`info` checks configuration and corpus files. The default `build` computes a stable `build_id`, paper count, corpus hash, and conservative Token upper bound without reading the key, calling DashScope, or writing an index.
+
+## Build explicitly
+
+After confirming the budget, run:
+
+```bash
+uv run icml-papers build --execute --max-input-tokens <TOKEN_CAP>
+```
+
+Cloud calls occur only when both `--execute` and a positive cap are present. The build writes to staging and switches `current` atomically only after complete validation.
+
+Resume complete batches after an interruption:
+
+```bash
+uv run icml-papers build --execute \
+  --max-input-tokens <TOKEN_CAP> --resume
+```
+
+You cannot resume after the corpus, model, dimension, batch size, or build ID changes. Run a new preflight and build instead.
+
+## Start and verify
+
+```bash
+uv run icml-paper-search-mcp
+curl -fsS http://127.0.0.1:20441/health/live
+curl -fsS http://127.0.0.1:20441/health/ready
+```
+
+`live` checks only the process. Without making cloud calls, `ready` validates state, Chroma, FTS5, the manifest, and source-corpus fingerprints.
+
+Register the local MCP:
+
+```bash
+claude mcp add --transport http icml-papers --scope project \
+  http://127.0.0.1:20441/mcp
+```
+
+## Default paths
+
+| Path | Contents |
+|---|---|
+| `data/` | Paper snapshots shipped with the project |
+| `.data/index/versions/` | Versioned Chroma, FTS5, and manifests |
+| `.data/index/current` | Current published-version pointer |
+| `.data/state/runtime.sqlite3` | Sessions, rate limits, budgets, and embedding cache |
+
+Never let multiple application processes share one Chroma directory. For production, continue with [Docker deployment](/en/docs/operations/docker) and [capacity planning](/en/docs/operations/capacity).

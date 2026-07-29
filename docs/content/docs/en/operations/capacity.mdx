@@ -1,0 +1,51 @@
+---
+title: Capacity and Concurrency
+description: Evaluate the defaults for 25–40 intermittent users and tune local and provider concurrency safely.
+---
+
+The defaults target roughly 25–40 intermittent users, not 40 continuously saturated search workers. Rate limits, admission, and layered semaphores bound anonymous traffic.
+
+## Default boundaries
+
+| Item | Default |
+|---|---:|
+| Search rate per IP | 6/minute, burst 3 |
+| Searches per IP per UTC day | 200 |
+| Session creation per IP | 3/minute, burst 2, 20/day |
+| Global search rate | 120/minute |
+| Active + waiting | 64 |
+| Admitted wait | 10 seconds |
+| DashScope concurrency | 4 |
+| Chroma concurrency | 2 |
+| Online daily/monthly Tokens | 500,000 / 10,000,000 |
+| Active sessions | 256 |
+
+## Three bottleneck classes
+
+1. **Provider**: network latency, account rate, and Token quota.
+2. **Local retrieval**: Chroma thread safety, CPU, memory, and disk latency.
+3. **State**: SQLite write contention, session capacity, and WAL disk usage.
+
+Concurrent cache misses for one query are merged by single-flight into one provider call, so cache hit rate materially changes capacity.
+
+## Tuning order
+
+Observe provider latency, local search latency, queue wait, `server_busy`, cache hits, and SQLite busy before changing only the responsible boundary:
+
+- Provider idle with a high queue: increase provider concurrency in small steps.
+- Rapidly rising Chroma latency: keep or reduce Chroma concurrency.
+- SQLite busy: shorten transactions or reduce concurrent state writes; do not hide contention with a larger timeout first.
+- High public spend: reduce IP/global rates or Token budgets, or increase cache TTL.
+- High session count: shorten TTL or ask clients to close sessions; never evict active sessions randomly.
+
+Change one group at a time and rerun mixed-concurrency tests. Do not scale by sharing a Chroma directory among application workers.
+
+## Uncovered transport risk
+
+The existing 40-client mixed test covers compliant application-level search and status calls. It does not prove unlimited tolerance for invalid transport traffic. The pinned MCP SDK may allocate a transport before a sessionless request completes header validation, and no idle timeout is currently configured. Browsers, scanners, or interrupted clients can therefore leave abandoned transport sessions without DELETE.
+
+This is a confirmed but unresolved risk. Do not present application-level concurrency tests as a capacity guarantee for such traffic. Follow-up work must separately evaluate ASGI prevalidation, SDK timeout or upgrade support, and bounded resource-reclamation tests.
+
+## Disk planning
+
+The canonical index and runtime copy coexist. Publishing a generation temporarily retains the old runtime copy as well, so plan state storage for at least two runtime indexes plus SQLite/WAL and filesystem headroom.

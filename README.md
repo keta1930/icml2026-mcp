@@ -1,33 +1,35 @@
 # ICML Paper Search MCP
 
-面向 6,341 篇 ICML 2026 论文的开源 MCP 检索服务。它把论文语料和检索索引保存在本地，以 Chroma dense retrieval 与 SQLite FTS5 BM25 做 weighted RRF 融合，并用持久化 capability session 避免多轮调研重复返回同一篇论文。
+[English](README.md) | [简体中文](README.zh-CN.md) | [Documentation](https://keta1930.github.io/icml2026-mcp/en/docs/)
 
-无需 Milvus、GPU、本地 embedding 模型或额外数据库服务。自托管只需要 Python、磁盘与 DashScope API key；也可以直接连接公共实例试用。
+An open-source MCP retrieval service for 6,341 ICML 2026 papers. It keeps the corpus and indexes local, combines Chroma dense retrieval with SQLite FTS5 BM25 through weighted RRF, and uses persistent capability sessions to avoid returning the same paper across research rounds.
 
-## 为什么使用它
+Self-hosting requires no Milvus, GPU, local embedding model, or external database service—only Python, disk space, and a DashScope API key. You can also connect directly to the public instance.
 
-- **为 agent 而设计**：通过 MCP 暴露检索、精确取回、过滤和会话状态工具。
-- **混合检索**：语义召回负责概念相关性，BM25 保留术语和专有名词的精确命中。
-- **多轮不重复**：session 在服务重启后仍可继续，同一 session 的并发检索也不会重复提交论文。
-- **本地持久化**：论文快照、Chroma、FTS5 与 runtime SQLite 均由单机管理。
-- **费用有边界**：建库必须显式确认 Token 上限；在线搜索有缓存、并发限制和日/月预算。
-- **适合公共服务**：提供限流、排队上限、健康检查、可信代理和脱敏错误契约。
+## Why use it
 
-## 直接连接公共服务
+- **Built for agents**: MCP tools cover search, exact retrieval, filtering, and session status.
+- **Hybrid retrieval**: dense search captures conceptual relevance while BM25 preserves exact terms and specialized names.
+- **No repeats across rounds**: sessions survive restarts, and concurrent searches in one session cannot commit the same paper twice.
+- **Local persistence**: paper snapshots, Chroma, FTS5, and runtime SQLite remain on one machine.
+- **Bounded cost**: index builds require an explicit Token cap; online search has caching, concurrency limits, and daily/monthly budgets.
+- **Public-service controls**: persistent rate limits, bounded queues, health checks, trusted proxies, and redacted errors are included.
 
-公共 MCP 端点：
+## Connect to the public service
+
+Public MCP endpoint:
 
 ```text
 https://icml.agent4sci.com:20441/mcp
 ```
 
-注册到 Claude Code：
+Register it with Claude Code:
 
 ```bash
 claude mcp add --transport http icml-papers --scope user https://icml.agent4sci.com:20441/mcp
 ```
 
-等价的 MCP 客户端配置：
+Equivalent MCP client configuration:
 
 ```json
 {
@@ -40,59 +42,68 @@ claude mcp add --transport http icml-papers --scope user https://icml.agent4sci.
 }
 ```
 
-公共实例匿名、免费且有共享额度，不提供可用性保证。新的检索 query 会发送到 DashScope 生成 embedding；不要在 query 或 session 标签中放入密钥、个人信息或未公开内容。
+`/mcp` is a Streamable HTTP protocol endpoint, not a web page or conventional REST JSON API. Opening it in a browser normally returns HTTP 406 with `Client must accept text/event-stream`; that is expected content negotiation. Use a Streamable HTTP MCP client whose SDK manages initialization and the transport session. For manual service checks, use:
 
-## 本地快速开始
+```text
+https://icml.agent4sci.com:20441/health/live
+https://icml.agent4sci.com:20441/health/ready
+```
 
-运行要求：Python 3.12+、[uv](https://docs.astral.sh/uv/) 和已开通 `qwen3.7-text-embedding` 的 DashScope API key。
+The response-header `Mcp-Session-Id` identifies the transport session. The `session_id` returned by `open_search_session` is a business capability session for paper deduplication. Do not interchange them.
+
+The public instance is anonymous and free to try, with a shared quota and no availability guarantee. New search queries are sent to DashScope for embedding; never include secrets, personal data, or unpublished material in queries or session labels.
+
+## Local quickstart
+
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), and a DashScope API key with access to `qwen3.7-text-embedding`.
 
 ```bash
 uv sync
 cp .env.example .env
 ```
 
-在 `.env` 中配置 key。直接值与 secret 文件二选一，文件优先：
+Set either a direct key or a secret file in `.env`; the file takes precedence:
 
 ```dotenv
 ICML_PAPERS_DASHSCOPE_API_KEY=your-dashscope-api-key
 # ICML_PAPERS_DASHSCOPE_API_KEY_FILE=/absolute/path/to/dashscope_api_key
 ```
 
-先执行零云调用预检：
+Run a zero-cloud preflight first:
 
 ```bash
 uv run icml-papers info
 uv run icml-papers build
 ```
 
-`build` 默认只输出稳定 `build_id`、论文数、语料哈希和保守的 Token 上界。确认预算后显式建库：
+By default, `build` prints a stable `build_id`, paper count, corpus hash, and conservative Token upper bound. After reviewing the budget, build explicitly:
 
 ```bash
 uv run icml-papers build --execute --max-input-tokens <TOKEN_CAP>
 ```
 
-网络或额度问题中断后，可在语料、模型、维度和 batch size 未改变时恢复：
+After a network or quota interruption, resume only if the corpus, model, dimension, and batch size have not changed:
 
 ```bash
 uv run icml-papers build --execute --max-input-tokens <TOKEN_CAP> --resume
 ```
 
-启动 Streamable HTTP MCP 服务：
+Start the Streamable HTTP MCP service:
 
 ```bash
 uv run icml-paper-search-mcp
 curl -fsS http://127.0.0.1:20441/health/ready
 ```
 
-默认 MCP 地址是 `http://127.0.0.1:20441/mcp`。注册到当前项目：
+The default MCP URL is `http://127.0.0.1:20441/mcp`. Register it for the current project:
 
 ```bash
 claude mcp add --transport http icml-papers --scope project http://127.0.0.1:20441/mcp
 ```
 
-完整的建库契约、本地目录和故障恢复步骤见[本地部署文档](docs/content/docs/getting-started/local-deployment.mdx)。
+See [Local Deployment](docs/content/docs/en/getting-started/local-deployment.mdx) for the complete build contract, paths, and recovery process.
 
-## 推荐的调研流程
+## Recommended research flow
 
 ```text
 open_search_session(label="diffusion for language models")
@@ -102,26 +113,26 @@ open_search_session(label="diffusion for language models")
   -> close_search_session(session_id=...)
 ```
 
-`session_id` 是至少 256-bit 的 bearer capability。拿到它的人即可访问对应会话；服务端只保存其 SHA-256 摘要，不能列举或找回原始 id。默认空闲 24 小时过期。
+`session_id` is a bearer capability with at least 256 bits of randomness. Anyone holding it can access that session. The server stores only a SHA-256 hash and cannot list or recover the raw ID. The default idle TTL is 24 hours.
 
-## MCP 工具
+## MCP tools
 
-| 工具 | 用途 |
+| Tool | Purpose |
 |---|---|
-| `open_search_session` | 创建不可枚举的 capability session |
-| `search_papers` | 执行混合检索；在 session 内只返回未见论文 |
-| `search_session_status` | 查看调用方持有的单个 session |
-| `close_search_session` | 关闭 session 并返回有界汇总 |
-| `get_papers` | 按 OpenReview id 精确取回论文 |
-| `list_paper_areas` | 列出 `area` 与 `paper_type` 的可用值 |
+| `open_search_session` | Create an unenumerable capability session |
+| `search_papers` | Run hybrid retrieval and return only unseen papers in a session |
+| `search_session_status` | Inspect one session held by the caller |
+| `close_search_session` | Close a session and return a bounded summary |
+| `get_papers` | Fetch papers exactly by OpenReview ID |
+| `list_paper_areas` | List valid `area` and `paper_type` values |
 
-参数、上下限和错误码见 [MCP Tools Reference](docs/content/docs/reference/mcp-tools.mdx)。
+See the [MCP Tools Reference](docs/content/docs/en/reference/mcp-tools.mdx) for parameters, bounds, and error codes.
 
-## 检索语义
+## Retrieval semantics
 
-每个 query 对 dense 与 BM25 各执行一次固定深度召回，再做 weighted RRF。默认 `search_depth = top_k × 4`，不会为了补满 `top_k` 自动下探到弱相关区域。
+Each query performs one dense and one BM25 retrieval at a fixed depth, then applies weighted RRF. The default is `search_depth = top_k × 4`; the service does not descend into weaker results merely to fill `top_k`.
 
-结果中的 `score` 是归一化到 `[0, 1]` 的融合排名分，不是余弦相似度、概率或跨 query 可比较的绝对相关度。它适合当前结果内排序和 `min_score` 粗过滤。
+The result `score` is a fused rank normalized to `[0, 1]`. It is not cosine similarity, a probability, or an absolute relevance measure comparable across queries. Use it for ordering within the current result set and coarse `min_score` filtering.
 
 ## CLI
 
@@ -131,42 +142,46 @@ uv run icml-papers search "discrete diffusion language models"
 uv run icml-papers search --session
 ```
 
-交互检索支持 `--area`、`--type`、`--spotlight`、`--top-k` 和 `--depth`。完整说明见 [CLI Reference](docs/content/docs/reference/cli.mdx)。
+Interactive search supports `--area`, `--type`, `--spotlight`, `--top-k`, and `--depth`. See the [CLI Reference](docs/content/docs/en/reference/cli.mdx).
 
-## 数据与运行边界
+## Data and runtime boundaries
 
-- `data/` 保存 6,341 篇论文的静态元数据、摘要与领域快照。
-- `.data/index/` 保存版本化 Chroma、FTS5、manifest 与原子 `current` 指针。
-- `.data/state/runtime.sqlite3` 保存 session、限流、预算和 query embedding cache。
-- Chroma 持久化目录只允许一个应用进程打开；不要用多个 worker 或容器共享该目录扩容。
-- 服务启动与 readiness 不访问 DashScope；首次未命中缓存的 query 才生成在线 embedding。
+- `data/` contains static metadata, abstracts, and taxonomy snapshots for 6,341 papers.
+- `.data/index/` contains versioned Chroma, FTS5, manifests, and the atomic `current` pointer.
+- `.data/state/runtime.sqlite3` contains sessions, rate limits, budgets, and the query-embedding cache.
+- Only one application process may open a persistent Chroma directory. Do not scale with multiple workers or containers sharing it.
+- Startup and readiness do not contact DashScope. The first uncached query creates an online embedding.
 
-## Docker 部署
+## Docker deployment
 
-镜像包含程序和语料，不包含 DashScope key、构建索引或 runtime state。生产参考位于 [`deploy/compose.yaml`](deploy/compose.yaml)，包含显式 `build-index` job、单进程应用、持久化目录、Docker secret 与 TLS sidecar。
+The image contains the application and corpus, not a DashScope key, built index, or runtime state. [`deploy/compose.yaml`](deploy/compose.yaml) provides an explicit `build-index` job, one application process, persistent mounts, Docker secrets, and a TLS sidecar.
 
 ```bash
 docker build --build-arg VCS_REF=local -t icml-paper-search-mcp:local .
 sh deploy/smoke-container.sh icml-paper-search-mcp:local
 ```
 
-生产部署前必须替换示例域名、证书、Host/Origin 白名单和可信代理网段。详细步骤见[容器部署](docs/content/docs/operations/docker.mdx)。
+Before production, replace example domains, certificates, Host/Origin allowlists, and trusted proxy networks. See [Docker Deployment](docs/content/docs/en/operations/docker.mdx).
 
-## 开发
+## Roadmap
 
-核心测试完全离线，不需要 key、网络、Docker、GPU 或外部数据库：
+Long-term work has two tracks: improve retrieval robustness across paraphrases, terminology, filter combinations, and fixed windows; and expand from ICML to more open scholarly sources while preserving provenance, venue/year isolation, and manifest contracts. See the full [Roadmap](docs/content/docs/en/roadmap.mdx).
+
+## Development
+
+Core tests are fully offline and need no key, network, Docker, GPU, or external database:
 
 ```bash
 uv run python -m pytest
 ```
 
-面向 agent 的架构边界与变更检查见 [AGENTS.md](AGENTS.md)。
+See [AGENTS.md](AGENTS.md) for architecture boundaries and change requirements.
 
-## 文档站
+## Documentation site
 
-Fumadocs 文档站位于 [`docs/`](docs/)，包含概念、教程、指南、Reference、部署运维、排障和 AI-readable delivery。
+The Fumadocs site lives in [`docs/`](docs/) and covers concepts, tutorials, guides, Reference, operations, troubleshooting, and AI-readable delivery.
 
-在线文档：<https://keta1930.github.io/icml2026-mcp/>
+English documentation: <https://keta1930.github.io/icml2026-mcp/en/docs/>
 
 ```bash
 cd docs
@@ -174,8 +189,8 @@ pnpm install
 pnpm dev
 ```
 
-开发站点默认运行在 `http://127.0.0.1:20440`，文档入口为 `/docs`，同时提供 `/llms.txt` 和每个页面的 `.md` 版本。
+The development server runs at `http://127.0.0.1:20440` by default. English docs are under `/en/docs/`, with `/en/llms.txt` and a clean `.md` form for every page.
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。
+This project is licensed under the [MIT License](LICENSE).

@@ -1,19 +1,22 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
-import { siteConfig } from "@/lib/site";
+import type { Language } from "@/lib/i18n";
+import { siteConfig, siteCopy } from "@/lib/site";
 
-export function baseOptions(): BaseLayoutProps {
+export function baseOptions(language: Language): BaseLayoutProps {
+  const copy = siteCopy(language);
   return {
     nav: {
       title: siteConfig.name,
+      url: `/${language}`,
     },
     links: [
       {
-        text: "文档",
-        url: "/docs",
+        text: copy.navDocs,
+        url: `/${language}/docs`,
         active: "nested-url",
       },
       {
-        text: "公共 MCP",
+        text: copy.navMcp,
         url: siteConfig.publicMcpUrl,
         external: true,
       },

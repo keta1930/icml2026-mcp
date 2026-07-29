@@ -53,8 +53,14 @@ jobs:
       - name: Install documentation dependencies
         run: pnpm --dir docs install --frozen-lockfile
 
-      - name: Build static documentation
-        run: pnpm --dir docs build
+      - name: Validate documentation sources
+        run: |
+          pnpm --dir docs check:reference
+          pnpm --dir docs check:docs
+          pnpm --dir docs typecheck
+
+      - name: Build and validate static documentation
+        run: pnpm --dir docs build:site
         env:
           GITHUB_PAGES: "true"
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
