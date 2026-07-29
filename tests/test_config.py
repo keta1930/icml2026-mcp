@@ -1,4 +1,4 @@
-"""验证开源运行配置、secret 优先级和脱敏。"""
+"""Validate open-source runtime settings, secret precedence, and sanitization."""
 
 from __future__ import annotations
 

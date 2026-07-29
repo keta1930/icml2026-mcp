@@ -1,4 +1,4 @@
-"""ICML 2026 论文的本地 hybrid search MCP 服务。"""
+"""Local hybrid-search MCP service for ICML 2026 papers."""
 
 from .config import Settings, get_settings
 from .embedding import TextEncoder
@@ -32,7 +32,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """延迟导出带运行时实现的协议，保持 package import 零副作用。"""
+    """Lazily export runtime protocols while keeping package imports side-effect free."""
     if name == "SearchEngine":
         from .retrieval import SearchEngine
 

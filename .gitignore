@@ -5,7 +5,7 @@ __pycache__/
 *.egg-info/
 .file/
 
-# 本机配置与运行时 secret
+# Local configuration and runtime secrets
 .env
 .env.*
 !.env.example
@@ -16,7 +16,7 @@ secrets/
 *.pem
 dashscope_api_key*
 
-# Chroma、版本化索引、状态库与恢复点
+# Chroma, versioned indexes, state databases, and recovery points
 .data/
 **/.data/
 *.sqlite
@@ -30,10 +30,10 @@ checkpoint.json
 .checkpoint.json.tmp
 *.staging/
 
-# 本地 Docker image 传输制品
+# Local Docker image transfer artifacts
 *.tar
 *.tar.gz
 *.tgz
 
-# 语料快照是源码的一部分，继续跟踪。
+# Corpus snapshots are source artifacts and remain tracked.
 !data/*.json

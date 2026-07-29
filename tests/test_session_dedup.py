@@ -1,4 +1,4 @@
-"""会话去重机制的行为验证——这是本项目的核心不变式。"""
+"""Behavioral validation of session deduplication, a core project invariant."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from icml_paper_search.sessions import SessionNotFoundError
 
 
 def test_repeated_query_returns_no_duplicates(service):
-    """同一 query 连续跑：第二轮起只给新论文，不重复已返回的条目。"""
+    """Return only unseen papers from the second run of an identical query onward."""
     session_id = service.open_session(label="dedup").session_id
 
     first = service.search("diffusion", session_id=session_id)
@@ -24,7 +24,7 @@ def test_repeated_query_returns_no_duplicates(service):
 
 
 def test_identical_query_eventually_returns_empty(service):
-    """反复跑同一 query 最终会返回空——候选池被全部去重掉。"""
+    """Repeated identical queries eventually empty the deduplicated candidate pool."""
     session_id = service.open_session().session_id
     outcomes = [service.search("diffusion", session_id=session_id) for _ in range(12)]
 
@@ -33,7 +33,7 @@ def test_identical_query_eventually_returns_empty(service):
 
 
 def test_consecutive_empty_rounds_mark_exhausted(service, settings):
-    """连续空轮累计到阈值即判定该方向检索完毕。"""
+    """Mark a direction exhausted at the consecutive-empty-round threshold."""
     session_id = service.open_session().session_id
     while not service.search("diffusion", session_id=session_id).is_empty:
         pass
@@ -47,9 +47,9 @@ def test_consecutive_empty_rounds_mark_exhausted(service, settings):
 
 
 def test_new_hits_reset_empty_round_counter(service):
-    """出现新论文时空轮计数归零，避免误判为已挖尽。"""
+    """Reset the empty-round count when new papers appear."""
     session_id = service.open_session().session_id
-    # 深度 1 的窗口：第二轮必空
+    # A depth-one window must be empty on the second round.
     service.search("a", session_id=session_id, top_k=1, search_depth=1)
     empty = service.search("a", session_id=session_id, top_k=1, search_depth=1)
     assert empty.is_empty
@@ -61,7 +61,7 @@ def test_new_hits_reset_empty_round_counter(service):
 
 
 def test_window_is_walked_page_by_page(service):
-    """固定窗口按页推进：depth=10/top_k=5 时两轮走完窗口，第三轮归零。"""
+    """Page through a fixed depth-10 window in two top-k-5 rounds."""
     session_id = service.open_session().session_id
 
     first = service.search("q", session_id=session_id, top_k=5, search_depth=10)
@@ -69,13 +69,13 @@ def test_window_is_walked_page_by_page(service):
     third = service.search("q", session_id=session_id, top_k=5, search_depth=10)
 
     assert len(first.hits) == 5
-    assert len(second.hits) == 5  # 窗口内还有新条目，仍给满页
-    assert third.is_empty  # 窗口耗尽 → 零新增信号
+    assert len(second.hits) == 5  # Remaining unseen items still fill the page.
+    assert third.is_empty  # An exhausted window signals zero new results.
     assert third.duplicates_suppressed == 10
 
 
 def test_window_does_not_dig_past_requested_depth(service, engine):
-    """窗口不做自动扩召回：只发一次固定 limit 的检索，不下探到弱相关区。"""
+    """Use one fixed-limit retrieval without expanding into weaker results."""
     session_id = service.open_session().session_id
     service.search("q", session_id=session_id, top_k=5, search_depth=10)
     engine.search_calls.clear()
@@ -88,13 +88,13 @@ def test_window_does_not_dig_past_requested_depth(service, engine):
 
 
 def test_depth_defaults_to_multiple_of_top_k(service, settings, engine):
-    """未指定 search_depth 时窗口 = top_k × depth_multiplier。"""
+    """Use top_k times depth_multiplier when search_depth is omitted."""
     service.search("q", top_k=4)
     assert engine.search_calls[-1] == 4 * settings.depth_multiplier
 
 
 def test_depth_is_clamped_to_max_and_at_least_top_k(service, settings, engine):
-    """窗口深度受上限约束，且不小于 top_k。"""
+    """Clamp window depth to the limit while keeping it at least top_k."""
     service.search("q", top_k=5, search_depth=settings.max_search_depth * 10)
     assert engine.search_calls[-1] == settings.max_search_depth
 
@@ -103,7 +103,7 @@ def test_depth_is_clamped_to_max_and_at_least_top_k(service, settings, engine):
 
 
 def test_truncated_flags_more_results_beyond_window(service):
-    """窗口填满但新条目不足时打上 truncated，提示还能往深处挖。"""
+    """Mark a full window truncated when too few unseen items remain."""
     session_id = service.open_session().session_id
     service.search("q", session_id=session_id, top_k=5, search_depth=5)
     outcome = service.search("q", session_id=session_id, top_k=5, search_depth=5)
@@ -113,13 +113,13 @@ def test_truncated_flags_more_results_beyond_window(service):
 
 
 def test_not_truncated_when_corpus_is_smaller_than_window(service, papers):
-    """语料本身不足窗口深度时不该谎报"还有更深的结果"。"""
+    """Do not claim deeper results when the corpus itself is smaller than the window."""
     outcome = service.search("q", top_k=5, search_depth=len(papers) + 10)
     assert not outcome.truncated
 
 
 def test_sessions_are_isolated(service):
-    """并行会话各自独立记账，互不影响。"""
+    """Keep accounting isolated across concurrent sessions."""
     a = service.open_session(label="a").session_id
     b = service.open_session(label="b").session_id
 
@@ -130,7 +130,7 @@ def test_sessions_are_isolated(service):
 
 
 def test_stateless_search_does_not_dedupe(service):
-    """不传 session_id 时不去重，两次结果一致。"""
+    """Keep searches stateless and identical when no session_id is provided."""
     first = service.search("q", top_k=5)
     second = service.search("q", top_k=5)
 
@@ -139,7 +139,7 @@ def test_stateless_search_does_not_dedupe(service):
 
 
 def test_get_papers_marks_seen(service):
-    """显式取回的论文也进去重集，后续检索不再重复吐出。"""
+    """Add explicitly fetched papers to the deduplication set."""
     session_id = service.open_session().session_id
     papers = service.get_papers(["p000", "p001"], session_id=session_id)
     assert [p.paper_id for p in papers] == ["p000", "p001"]
@@ -149,13 +149,13 @@ def test_get_papers_marks_seen(service):
 
 
 def test_get_papers_skips_unknown_ids(service):
-    """不存在的 id 被静默跳过，不影响其余取回。"""
+    """Skip unknown IDs without affecting other fetched papers."""
     papers = service.get_papers(["p000", "nope"])
     assert [p.paper_id for p in papers] == ["p000"]
 
 
 def test_close_session_returns_full_summary(service):
-    """关闭会话给出 query 轨迹与完整论文清单，之后 id 失效。"""
+    """Return query history and papers on close, then invalidate the capability."""
     session_id = service.open_session(label="wrap").session_id
     outcome = service.search("q", session_id=session_id, top_k=5)
 
@@ -176,14 +176,14 @@ def test_unknown_session_raises(service):
 
 
 def test_filters_narrow_the_candidate_pool(service, papers):
-    """过滤条件生效：spotlight-only 在全 non-spotlight 语料上返回空。"""
+    """Apply spotlight-only filtering to an entirely non-spotlight corpus."""
     outcome = service.search("q", filters=SearchFilters(spotlight_only=True))
     assert outcome.candidates_examined == 0
     assert outcome.is_empty
 
 
 def test_top_k_is_clamped(service, settings):
-    """top_k 被夹到 max_top_k，防止单轮吐爆 context。"""
+    """Clamp top_k to max_top_k to bound per-round context."""
     outcome = service.search("q", top_k=settings.max_top_k + 100)
     assert len(outcome.hits) <= settings.max_top_k
 
@@ -194,7 +194,7 @@ def test_empty_query_rejected(service):
 
 
 def test_session_capacity_rejects_without_cross_user_eviction(service, settings):
-    """会话数超上限时稳定拒绝，不回收其他调用方的活跃 capability。"""
+    """Reject capacity overflow without evicting another caller's active capability."""
     ids = [service.open_session(label=str(n)).session_id for n in range(settings.max_sessions)]
     with pytest.raises(SessionCapacityReached):
         service.open_session(label="overflow")

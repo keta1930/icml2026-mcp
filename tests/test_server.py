@@ -1,4 +1,4 @@
-"""异步 MCP schema、offload、可信代理与安全错误边界。"""
+"""Async MCP schema, offload, trusted-proxy, and safe-error boundary tests."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from icml_paper_search.models import (
     SessionSummary,
 )
 from icml_paper_search.server import (
+    INSTRUCTIONS,
     ApplicationResources,
     _resolve_client_ip,
     _safe_tool_call,
@@ -77,7 +78,7 @@ def _context(resources: ApplicationResources, *, peer="198.51.100.10", headers=(
 
 
 class LifecycleResources(ApplicationResources):
-    """记录真实 ASGI 与 transport 生命周期对进程资源的影响。"""
+    """Record how real ASGI and transport lifecycles affect process resources."""
 
     def __init__(self, settings: Settings, *, fail_initialize: bool = False) -> None:
         super().__init__(settings)
@@ -105,7 +106,7 @@ class LifecycleResources(ApplicationResources):
 
 
 class LocalLifecycleService:
-    """提供零 provider 的本地 readiness 与可计数关闭边界。"""
+    """Provide local readiness and countable close behavior without a provider."""
 
     def __init__(self) -> None:
         self.validate_calls = 0
@@ -119,7 +120,7 @@ class LocalLifecycleService:
 
 
 class FailingDatabase:
-    """模拟 state 初始化失败并记录清理。"""
+    """Simulate state initialization failure and record cleanup."""
 
     def __init__(self) -> None:
         self.initialize_calls = 0
@@ -141,7 +142,7 @@ _MCP_HEADERS = {
 
 
 def _open_transport(client: TestClient, request_id: int) -> str:
-    """通过真实 Streamable HTTP initialize 建立一个 transport。"""
+    """Establish a transport through a real Streamable HTTP initialize request."""
     response = client.post(
         "/mcp",
         headers=_MCP_HEADERS,
@@ -168,7 +169,7 @@ def _open_transport(client: TestClient, request_id: int) -> str:
 
 
 def _list_tools(client: TestClient, session_id: str, request_id: int) -> None:
-    """在指定 transport 上执行一个真实 MCP tool-list 请求。"""
+    """Run a real MCP tool-list request on a transport."""
     response = client.post(
         "/mcp",
         headers={**_MCP_HEADERS, "mcp-session-id": session_id},
@@ -181,7 +182,7 @@ def _list_tools(client: TestClient, session_id: str, request_id: int) -> None:
 def _call_status_without_capability(
     client: TestClient, session_id: str, request_id: int
 ) -> None:
-    """调用一个读取进程资源、但不会访问 provider 的真实 MCP tool。"""
+    """Call a real MCP tool that reads process resources without provider access."""
     response = client.post(
         "/mcp",
         headers={**_MCP_HEADERS, "mcp-session-id": session_id},
@@ -197,7 +198,7 @@ def _call_status_without_capability(
 
 
 def _close_transport(client: TestClient, session_id: str) -> None:
-    """终止一个真实 Streamable HTTP transport。"""
+    """Terminate a real Streamable HTTP transport."""
     response = client.delete(
         "/mcp", headers={**_MCP_HEADERS, "mcp-session-id": session_id}
     )
@@ -205,7 +206,7 @@ def _close_transport(client: TestClient, session_id: str) -> None:
 
 
 def test_six_tools_are_async_and_context_is_not_in_schema(tmp_path):
-    """保留六个名称，同时避免同步 tool 阻塞 event loop。"""
+    """Preserve six tool names while keeping synchronous work off the event loop."""
     server = create_mcp(_settings(tmp_path))
     tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
     assert set(tools) == {
@@ -222,8 +223,157 @@ def test_six_tools_are_async_and_context_is_not_in_schema(tmp_path):
     assert tools["get_papers"].parameters["properties"]["paper_ids"]["maxItems"] == 50
 
 
+def test_initialize_and_tool_schema_match_the_english_contract(tmp_path):
+    expected_instructions = (
+        "Hybrid search over 6,341 ICML 2026 papers using Chroma dense retrieval and "
+        "SQLite BM25.\nFor multi-round research, create a capability session, keep its "
+        "`session_id` private, and\nreuse it across `search_papers` calls so previously "
+        "returned papers are suppressed.\nConsecutive empty rounds indicate that the "
+        "current direction may be exhausted; rephrase\nthe query, increase `search_depth`, "
+        "or close the session. Without a `session_id`, searches\nare stateless. Anonymous "
+        "callers cannot enumerate other sessions."
+    )
+    expected_tools = [
+        (
+            "open_search_session",
+            "Open Search Session",
+            "Create an unenumerable capability session for automatic deduplication "
+            "across search rounds.",
+        ),
+        (
+            "search_papers",
+            "Search Papers",
+            "Search ICML 2026 papers with Chroma dense retrieval and SQLite BM25 weighted "
+            "RRF; with `session_id`, return only papers not yet seen in that session.",
+        ),
+        (
+            "close_search_session",
+            "Close Search Session",
+            "Close a capability session and return a bounded search summary.",
+        ),
+        (
+            "search_session_status",
+            "Search Session Status",
+            "Inspect one capability session by `session_id`; anonymous callers cannot "
+            "enumerate sessions.",
+        ),
+        (
+            "get_papers",
+            "Get Papers",
+            "Fetch full abstracts by OpenReview ID and optionally mark the papers as seen "
+            "in a capability session atomically.",
+        ),
+        (
+            "list_paper_areas",
+            "List Paper Areas",
+            "List available `area` and `paper_type` values with corpus counts.",
+        ),
+    ]
+    expected_descriptions = {
+        "open_search_session": {
+            "label": "Optional topic label for the session.",
+            "default_top_k": "Default number of results returned per round for this session.",
+        },
+        "search_papers": {
+            "query": "Natural-language research topic or method.",
+            "session_id": "Capability session ID used for persistent deduplication.",
+            "top_k": "Maximum number of new papers to return.",
+            "search_depth": "Fixed relevance-window depth.",
+            "area": "Research area filter.",
+            "paper_type": "Paper type filter.",
+            "spotlight_only": "Return only spotlight papers.",
+            "min_score": "Minimum normalized weighted-RRF score.",
+            "include_abstract": "Include abstract previews in the result.",
+        },
+        "close_search_session": {"session_id": "Capability session ID to close."},
+        "search_session_status": {
+            "session_id": "Capability session ID to inspect.",
+            "include_papers": "Include a bounded list of paper titles.",
+        },
+        "get_papers": {
+            "paper_ids": "OpenReview paper IDs.",
+            "session_id": (
+                "Capability session in which returned papers are atomically marked as seen."
+            ),
+        },
+        "list_paper_areas": {},
+    }
+
+    server = create_mcp(_settings(tmp_path))
+    tools = server._tool_manager.list_tools()
+
+    assert INSTRUCTIONS == expected_instructions
+    assert [(tool.name, tool.title, tool.description) for tool in tools] == expected_tools
+    for tool in tools:
+        properties = tool.parameters.get("properties", {})
+        assert {
+            name: schema["description"] for name, schema in properties.items()
+        } == expected_descriptions[tool.name]
+        assert not re.search(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", tool.description)
+
+    by_name = {tool.name: tool.parameters for tool in tools}
+    assert by_name["open_search_session"].get("required", []) == []
+    assert by_name["open_search_session"]["properties"]["label"] == {
+        "default": "",
+        "description": "Optional topic label for the session.",
+        "maxLength": 120,
+        "title": "Label",
+        "type": "string",
+    }
+    assert by_name["open_search_session"]["properties"]["default_top_k"]["anyOf"] == [
+        {"maximum": 50, "minimum": 1, "type": "integer"},
+        {"type": "null"},
+    ]
+    search_schema = by_name["search_papers"]
+    assert search_schema["required"] == ["query"]
+    assert search_schema["properties"]["query"]["minLength"] == 1
+    assert search_schema["properties"]["query"]["maxLength"] == 2_000
+    assert search_schema["properties"]["session_id"]["default"] is None
+    assert search_schema["properties"]["top_k"]["anyOf"] == [
+        {"maximum": 50, "minimum": 1, "type": "integer"},
+        {"type": "null"},
+    ]
+    assert search_schema["properties"]["search_depth"]["anyOf"] == [
+        {"minimum": 1, "type": "integer"},
+        {"type": "null"},
+    ]
+    assert search_schema["properties"]["area"]["default"] is None
+    assert search_schema["properties"]["paper_type"]["default"] is None
+    assert search_schema["properties"]["spotlight_only"]["default"] is False
+    assert search_schema["properties"]["min_score"]["anyOf"] == [
+        {"maximum": 1.0, "minimum": 0.0, "type": "number"},
+        {"type": "null"},
+    ]
+    assert search_schema["properties"]["include_abstract"]["default"] is True
+    assert by_name["close_search_session"]["required"] == ["session_id"]
+    assert by_name["close_search_session"]["properties"]["session_id"]["minLength"] == 1
+    assert by_name["search_session_status"].get("required", []) == []
+    assert by_name["search_session_status"]["properties"]["session_id"]["default"] is None
+    assert by_name["search_session_status"]["properties"]["include_papers"]["default"] is False
+    assert by_name["get_papers"]["required"] == ["paper_ids"]
+    assert by_name["get_papers"]["properties"]["paper_ids"]["minItems"] == 1
+    assert by_name["get_papers"]["properties"]["paper_ids"]["maxItems"] == 50
+    assert by_name["get_papers"]["properties"]["session_id"]["default"] is None
+    assert by_name["list_paper_areas"]["properties"] == {}
+
+
+def test_streamable_http_rejects_plain_get_and_health_remains_available(tmp_path):
+    resources = LifecycleResources(_settings(tmp_path))
+    server = create_mcp(resources.settings, resources=resources)
+
+    with TestClient(
+        server.streamable_http_app(), base_url="http://127.0.0.1:20441"
+    ) as client:
+        response = client.get("/mcp", headers={"accept": "application/json"})
+
+        assert response.status_code == 406
+        assert response.json()["error"]["code"] == -32600
+        assert client.get("/health/live").json() == {"status": "ok"}
+        assert client.get("/health/ready").json() == {"status": "ready"}
+
+
 def test_asgi_startup_initializes_resources_before_first_transport(tmp_path):
-    """ASGI startup 后即 ready，且 FastMCP session manager 同时运行。"""
+    """Become ready at ASGI startup while running the FastMCP session manager."""
     resources = LifecycleResources(_settings(tmp_path))
     server = create_mcp(resources.settings, resources=resources)
     app = server.streamable_http_app()
@@ -241,7 +391,7 @@ def test_asgi_startup_initializes_resources_before_first_transport(tmp_path):
 
 
 def test_two_transports_do_not_own_shared_application_resources(tmp_path):
-    """关闭一个 transport 不得关闭另一个 transport 使用的共享资源。"""
+    """Closing one transport must not close resources used by another transport."""
     resources = LifecycleResources(_settings(tmp_path))
     server = create_mcp(resources.settings, resources=resources)
 
@@ -266,7 +416,7 @@ def test_two_transports_do_not_own_shared_application_resources(tmp_path):
 
 
 def test_asgi_startup_failure_fails_closed(tmp_path):
-    """资源初始化失败必须阻断 ASGI startup，不能先对外服务。"""
+    """Resource initialization failure must stop ASGI startup before serving."""
     resources = LifecycleResources(_settings(tmp_path), fail_initialize=True)
     server = create_mcp(resources.settings, resources=resources)
 
@@ -274,21 +424,21 @@ def test_asgi_startup_failure_fails_closed(tmp_path):
         with TestClient(
             server.streamable_http_app(), base_url="http://127.0.0.1:20441"
         ):
-            pytest.fail("startup failure 后不应进入服务上下文")
+            pytest.fail("the service context must not open after startup failure")
 
     assert resources.initialize_calls == 1
     assert resources.close_calls == 0
 
 
 def test_real_resources_start_locally_and_close_once(tmp_path, monkeypatch):
-    """真实资源容器在 startup 不读取 key，shutdown 后重复关闭无副作用。"""
+    """Start real resources without reading a key and close idempotently."""
     settings = _settings(tmp_path)
     service = LocalLifecycleService()
     resources = ApplicationResources(settings, service=service)  # type: ignore[arg-type]
     server = create_mcp(settings, resources=resources)
 
     def reject_key_resolution(_settings: Settings) -> str:
-        raise AssertionError("ASGI lifecycle 不得读取 provider key")
+        raise AssertionError("the ASGI lifecycle must not read the provider key")
 
     monkeypatch.setattr(Settings, "resolve_dashscope_api_key", reject_key_resolution)
 
@@ -305,7 +455,7 @@ def test_real_resources_start_locally_and_close_once(tmp_path, monkeypatch):
 
 
 def test_partial_startup_failure_closes_owned_resources(tmp_path):
-    """真实资源初始化中途失败时清理一次，且 session manager 不启动。"""
+    """Clean partial real-resource startup once without starting the session manager."""
     database = FailingDatabase()
     resources = ApplicationResources(
         _settings(tmp_path), database=database  # type: ignore[arg-type]
@@ -316,7 +466,7 @@ def test_partial_startup_failure_closes_owned_resources(tmp_path):
         with TestClient(
             server.streamable_http_app(), base_url="http://127.0.0.1:20441"
         ):
-            pytest.fail("state startup failure 后不应进入服务上下文")
+            pytest.fail("the service context must not open after state startup failure")
 
     assert database.initialize_calls == 1
     assert database.close_calls == 1
@@ -326,7 +476,7 @@ def test_partial_startup_failure_closes_owned_resources(tmp_path):
 
 
 def test_safe_error_does_not_echo_internal_message():
-    """未知异常 message 可能含 provider body，公开文本不得透传。"""
+    """Do not expose provider bodies embedded in unknown exception messages."""
 
     async def scenario() -> str:
         async def fail() -> str:
@@ -340,7 +490,7 @@ def test_safe_error_does_not_echo_internal_message():
 
 
 def test_client_ip_only_accepts_header_from_trusted_proxy(tmp_path):
-    """公网 peer 不能伪造覆盖 header，Compose 私网代理可以。"""
+    """Reject spoofed override headers from public peers and accept trusted proxies."""
     settings = _settings(
         tmp_path,
         trusted_proxy_enabled=True,
@@ -356,7 +506,7 @@ def test_client_ip_only_accepts_header_from_trusted_proxy(tmp_path):
 
 
 def test_transport_domains_are_explicit_configuration(tmp_path):
-    """库默认不绑定 mita，自托管域名必须通过配置显式放行。"""
+    """Keep the library deployment-neutral and require explicit self-hosted domains."""
     settings = _settings(
         tmp_path,
         allowed_hosts=("papers.example.org:20441",),
@@ -369,7 +519,7 @@ def test_transport_domains_are_explicit_configuration(tmp_path):
 
 
 class SlowService:
-    """模拟阻塞搜索，同时让轻量 status 立即完成。"""
+    """Simulate a blocking search while lightweight status completes immediately."""
 
     def __init__(self) -> None:
         self.entered = threading.Event()
@@ -407,7 +557,7 @@ class SlowService:
 
 
 class CountingSessionService(SlowService):
-    """记录真正进入 session 写入边界的调用数。"""
+    """Count calls that actually enter the session write boundary."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -435,7 +585,7 @@ class CountingSessionService(SlowService):
 
 
 class ConcurrentEngine:
-    """返回同一候选窗口并记录搜索线程并发。"""
+    """Return one candidate window while recording search-thread concurrency."""
 
     def __init__(self, count: int = 60) -> None:
         self.papers = [
@@ -479,7 +629,7 @@ class ConcurrentEngine:
 
 
 def test_slow_search_does_not_block_session_status(tmp_path):
-    """慢 provider/search worker 不占用 event loop 或 state limiter。"""
+    """Keep slow provider/search workers off the event loop and state limiter."""
 
     async def scenario() -> None:
         settings = _settings(tmp_path)
@@ -492,7 +642,7 @@ def test_slow_search_does_not_block_session_status(tmp_path):
         started = time.monotonic()
         status = await search_session_status(ctx, "ses_test")
         elapsed = time.monotonic() - started
-        assert "检索会话状态" in status
+        assert "Search session status" in status
         assert elapsed < 0.08
         await search_task
         resources.close()
@@ -501,7 +651,7 @@ def test_slow_search_does_not_block_session_status(tmp_path):
 
 
 def test_anonymous_status_requires_capability(tmp_path):
-    """无参 status 返回稳定 invalid_request，永不枚举全局 session。"""
+    """Return stable invalid_request for status without enumerating sessions."""
 
     async def scenario() -> str:
         settings = _settings(tmp_path)
@@ -513,12 +663,11 @@ def test_anonymous_status_requires_capability(tmp_path):
             resources.close()
 
     text = asyncio.run(scenario())
-    assert text.startswith("error[invalid_request]")
-    assert "session_id" in text
+    assert text == "error[invalid_request]: `session_id` is required."
 
 
 def test_open_session_rate_limit_runs_before_session_write(tmp_path):
-    """单个匿名来源的容量攻击在 session 写入前被持久限流。"""
+    """Persistently rate-limit one anonymous source before session writes."""
 
     async def scenario() -> None:
         settings = _settings(
@@ -541,14 +690,14 @@ def test_open_session_rate_limit_runs_before_session_write(tmp_path):
             resources.close()
 
         assert service.open_calls == 2
-        assert sum(text.startswith("已开启检索会话") for text in results) == 2
+        assert sum(text.startswith("Search session opened") for text in results) == 2
         assert sum(text.startswith("error[rate_limited]") for text in results) == 38
 
     asyncio.run(scenario())
 
 
 def test_40_clients_mix_search_and_status_with_same_session(tmp_path):
-    """40 个客户端混合调用时不阻塞状态请求且 session 无重复。"""
+    """Serve 40 mixed clients without blocking status or duplicating session papers."""
 
     async def scenario() -> None:
         settings = _settings(
@@ -607,7 +756,7 @@ def test_40_clients_mix_search_and_status_with_same_session(tmp_path):
         assert len(paper_ids) == 20
         assert len(set(paper_ids)) == 20
         assert all("error[" not in text for text in search_results)
-        assert all("检索会话状态" in text for text in status_results)
+        assert all("Search session status" in text for text in status_results)
         assert engine.max_active <= settings.provider_concurrency
         assert resources.admission is not None
         assert resources.admission.peak_admitted_count <= settings.search_queue_size

@@ -1,4 +1,4 @@
-"""SQLite capability session 的并发、持久化与边界验证。"""
+"""Concurrency, persistence, and boundary tests for SQLite capability sessions."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from icml_paper_search.state import RuntimeDatabase, hash_capability
 
 
 class Clock:
-    """提供可推进的 UTC 测试时钟。"""
+    """Provide an advanceable UTC test clock."""
 
     def __init__(self) -> None:
         self.value = datetime(2026, 7, 28, tzinfo=timezone.utc)
@@ -83,7 +83,7 @@ def _commit(manager: SessionManager, token: str, hits: list[SearchHit]):
 
 
 def test_concurrent_rounds_never_return_same_paper(tmp_path):
-    """同 session 的两个事务必须基于已提交 seen 继续取下一页。"""
+    """Base concurrent transactions on committed seen state before taking the next page."""
     clock = Clock()
     manager = _manager(_settings(tmp_path), clock)
     token = manager.open().session_id
@@ -99,7 +99,7 @@ def test_concurrent_rounds_never_return_same_paper(tmp_path):
 
 
 def test_capability_survives_restart_but_raw_token_is_never_stored(tmp_path):
-    """重开 store 后 session 可用，数据库只出现 capability hash。"""
+    """Keep sessions usable after reopening while storing only capability hashes."""
     settings = _settings(tmp_path)
     clock = Clock()
     token = _manager(settings, clock).open(label="restart").session_id
@@ -114,7 +114,7 @@ def test_capability_survives_restart_but_raw_token_is_never_stored(tmp_path):
 
 
 def test_capacity_rejects_without_evicting_active_session(tmp_path):
-    """容量满时稳定拒绝，不跨调用方做 LRU 淘汰。"""
+    """Reject at capacity without cross-caller LRU eviction."""
     settings = _settings(tmp_path, max_sessions=1)
     clock = Clock()
     manager = _manager(settings, clock)
@@ -126,7 +126,7 @@ def test_capacity_rejects_without_evicting_active_session(tmp_path):
 
 
 def test_expired_session_is_reclaimed_and_not_distinguishable(tmp_path):
-    """过期 capability 与随机 capability 都返回统一错误。"""
+    """Return the same error for expired and random capabilities."""
     settings = _settings(tmp_path, max_sessions=1)
     clock = Clock()
     manager = _manager(settings, clock)
@@ -142,7 +142,7 @@ def test_expired_session_is_reclaimed_and_not_distinguishable(tmp_path):
 
 
 def test_close_is_atomic_and_summary_is_bounded(tmp_path):
-    """close 返回有界清单并立即使 capability 失效。"""
+    """Return a bounded close summary and invalidate the capability immediately."""
     settings = _settings(tmp_path, session_summary_paper_limit=3)
     clock = Clock()
     manager = _manager(settings, clock)

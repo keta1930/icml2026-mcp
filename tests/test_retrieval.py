@@ -1,4 +1,4 @@
-"""Chroma + FTS5 持久化、过滤、RRF 与 fixed-window 测试。"""
+"""Chroma/FTS5 persistence, filtering, RRF, and fixed-window tests."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ DIMENSION = 1024
 
 
 class FakeEncoder:
-    """返回固定 query 向量，保证测试不访问网络。"""
+    """Return a fixed query vector so tests never access the network."""
 
     def __init__(self, vector):
         self.vector = vector
@@ -76,7 +76,7 @@ def make_record(
 
 
 def write_source_files(path, records):
-    """写出与测试索引对应的原始语料快照。"""
+    """Write source corpus snapshots matching the test index."""
     papers = []
     abstracts = {}
     for record in records:

@@ -1,4 +1,4 @@
-"""验证 Runtime SQLite 的 migration、事务和隐私 hash。"""
+"""Validate Runtime SQLite migrations, transactions, and privacy hashes."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def test_restart_is_idempotent_and_close_is_final(tmp_path):
     restarted.initialize()
     restarted.close()
 
-    with pytest.raises(RuntimeError, match="已关闭"):
+    with pytest.raises(RuntimeError, match="is closed"):
         with restarted.connection():
             pass
 

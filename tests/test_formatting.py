@@ -1,4 +1,4 @@
-"""输出渲染：确认关键统计与空结果解释都出现在 agent 可见的文本里。"""
+"""Validate compact agent-facing result, empty-state, and session rendering."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from icml_paper_search.formatting import (
     format_search_outcome,
     format_session_summary,
 )
-from icml_paper_search.models import SearchFilters
+from icml_paper_search.models import Paper, SearchFilters, SearchHit, SearchOutcome
 
 
 def test_outcome_header_reports_dedup_stats(service, settings):
@@ -17,10 +17,10 @@ def test_outcome_header_reports_dedup_stats(service, settings):
     outcome = service.search("q", session_id=session_id, top_k=5, search_depth=20)
 
     text = format_search_outcome(outcome, settings)
-    assert "新增 5 条" in text
-    assert "去重隐藏 5 条" in text
-    assert "窗口 20/20 条" in text
-    assert "会话累计" in text
+    assert "new=5" in text
+    assert "duplicates_suppressed=5" in text
+    assert "window=20/20" in text
+    assert "session_total=" in text
 
 
 def test_empty_outcome_explains_exhaustion(service, settings):
@@ -31,26 +31,26 @@ def test_empty_outcome_explains_exhaustion(service, settings):
         outcome = service.search("q", session_id=session_id)
 
     text = format_search_outcome(outcome, settings)
-    assert "检索完毕" in text
+    assert "this direction is exhausted" in text
 
 
 def test_empty_outcome_without_candidates_flags_filters(service, settings):
     outcome = service.search("q", filters=SearchFilters(spotlight_only=True))
     text = format_search_outcome(outcome, settings)
-    assert "过滤条件" in text
-    assert "没有匹配结果" not in text  # 是被过滤掉的，不是语料里没有
+    assert "filters may be too narrow" in text
+    assert "no matching results in the corpus" not in text
 
 
 def test_empty_outcome_blames_min_score_not_the_corpus(service, settings):
-    """被 min_score 筛空时要说清是分数门槛，别谎报语料无此主题。"""
+    """Attribute an empty result to min_score rather than the corpus."""
     outcome = service.search("q", min_score=1.0)
     text = format_search_outcome(outcome, settings)
     assert "min_score=1.0" in text
-    assert "没有匹配结果" not in text
+    assert "no matching results in the corpus" not in text
 
 
 def test_deeper_hint_suggests_a_concrete_depth(service, settings):
-    """窗口看完时给出可直接照用的 search_depth 建议值。"""
+    """Give a directly usable search_depth after a complete window."""
     session_id = service.open_session().session_id
     service.search("q", session_id=session_id, top_k=5, search_depth=5)
     outcome = service.search("q", session_id=session_id, top_k=5, search_depth=5)
@@ -61,7 +61,7 @@ def test_deeper_hint_suggests_a_concrete_depth(service, settings):
 
 
 def test_deeper_hint_at_max_depth_stops_suggesting(service, settings):
-    """已到深度上限时不再劝深挖，而是让 agent 换方向。"""
+    """Recommend a new direction instead of more depth at the global limit."""
     session_id = service.open_session().session_id
     depth = settings.max_search_depth
     while not service.search("q", session_id=session_id, search_depth=depth).is_empty:
@@ -69,7 +69,7 @@ def test_deeper_hint_at_max_depth_stops_suggesting(service, settings):
     outcome = service.search("q", session_id=session_id, search_depth=depth)
 
     text = format_search_outcome(outcome, settings)
-    assert "换个措辞" in text or "换研究主题" in text
+    assert "Rephrase the query or change direction" in text
 
 
 def test_abstract_is_truncated_in_listings(service):
@@ -90,16 +90,54 @@ def test_format_papers_keeps_full_abstract_and_lists_missing(service, settings):
     papers = service.get_papers(["p000"])
     text = format_papers(papers, settings, missing_ids=["nope"])
     assert "…" not in text
-    assert "nope" in text
+    assert text.startswith("Retrieved 1 paper(s)")
+    assert "IDs not found: nope" in text
 
 
 def test_session_summary_includes_query_trace(service):
-    session_id = service.open_session(label="topic").session_id
+    session_id = service.open_session(label="研究主题").session_id
     service.search("alpha", session_id=session_id, top_k=2)
     summary = service.close_session(session_id)
 
-    text = format_session_summary(summary, title="已关闭检索会话")
-    assert "topic" in text
+    text = format_session_summary(summary, title="Search session closed")
+    assert "研究主题" in text
     assert "hash:" in text
     assert "alpha" not in text
-    assert "已检索论文" in text
+    assert "Retrieved papers" in text
+
+
+def test_mixed_language_business_values_are_preserved_verbatim(settings):
+    paper = Paper(
+        paper_id="mixed",
+        title="中文论文标题",
+        abstract="中文摘要内容",
+        authors=("测试作者",),
+        area="机器学习领域",
+        subarea="子领域",
+        paper_type="海报",
+        spotlight=False,
+        arxiv_id="",
+    )
+    outcome = SearchOutcome(
+        query="中文查询",
+        hits=[SearchHit(paper=paper, score=0.5)],
+        search_depth=5,
+        candidates_examined=1,
+        duplicates_suppressed=0,
+        filters=SearchFilters(area="机器学习领域"),
+    )
+
+    text = format_search_outcome(outcome, settings)
+
+    for value in (
+        "中文查询",
+        "中文论文标题",
+        "中文摘要内容",
+        "测试作者",
+        "机器学习领域",
+        "子领域",
+        "海报",
+    ):
+        assert value in text
+    assert "new=1" in text
+    assert "stateless (deduplication disabled)" in text

@@ -1,4 +1,4 @@
-"""版本化本地索引的 manifest、校验与原子切换。"""
+"""Manifest, validation, and atomic switching for versioned local indexes."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _BUILD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 @dataclass(frozen=True, slots=True)
 class IndexManifest:
-    """一个不可拆分 Chroma/FTS5 索引版本的契约。"""
+    """Contract for one indivisible Chroma/FTS5 index version."""
 
     schema_version: int
     build_id: str
@@ -57,7 +57,7 @@ class IndexManifest:
         settings: Settings,
         collection_name: str,
     ) -> IndexManifest:
-        """按当前固定协议创建 manifest。"""
+        """Create a manifest using the current fixed protocol."""
         return cls(
             schema_version=INDEX_SCHEMA_VERSION,
             build_id=build_id,
@@ -79,7 +79,7 @@ class IndexManifest:
 
 
 def collection_metadata_for(manifest: IndexManifest) -> dict[str, str | int]:
-    """生成 Chroma collection 必须持久化的索引契约。"""
+    """Build the index contract that a Chroma collection must persist."""
     return {
         "hnsw:space": manifest.dense_metric,
         "index_schema_version": manifest.schema_version,
@@ -93,7 +93,7 @@ def collection_metadata_for(manifest: IndexManifest) -> dict[str, str | int]:
 
 @dataclass(frozen=True, slots=True)
 class IndexPaths:
-    """索引根目录及其版本路径约定。"""
+    """Index-root and version-path conventions."""
 
     root: Path
     versions: Path
@@ -101,30 +101,30 @@ class IndexPaths:
 
     @classmethod
     def for_root(cls, root: Path) -> IndexPaths:
-        """从配置根目录构造路径集合。"""
+        """Construct the path set from a configured root directory."""
         root = Path(root)
         return cls(root=root, versions=root / "versions", current=root / "current")
 
     def version(self, build_id: str) -> Path:
-        """返回已完成版本目录。"""
+        """Return a completed version directory."""
         _validate_build_id(build_id)
         return self.versions / build_id
 
     def staging(self, build_id: str) -> Path:
-        """返回可恢复 staging 目录。"""
+        """Return a resumable staging directory."""
         _validate_build_id(build_id)
         return self.versions / f"{build_id}.staging"
 
 
 def collection_name_for(build_id: str) -> str:
-    """生成仅含 Chroma 允许字符的稳定 collection 名。"""
+    """Generate a stable collection name using only Chroma-allowed characters."""
     _validate_build_id(build_id)
     normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", build_id).strip("-_")
     return f"icml-papers-{normalized}"[:63]
 
 
 def load_manifest(version_path: Path) -> IndexManifest:
-    """从版本目录或 manifest 文件读取并校验结构。"""
+    """Read and validate structure from a version directory or manifest file."""
     path = Path(version_path)
     if path.is_dir():
         path = path / "manifest.json"
@@ -138,7 +138,7 @@ def load_manifest(version_path: Path) -> IndexManifest:
 
 
 def write_manifest(version_path: Path, manifest: IndexManifest) -> Path:
-    """原子写入规范 JSON manifest。"""
+    """Atomically write a canonical JSON manifest."""
     directory = Path(version_path)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / "manifest.json"
@@ -156,7 +156,7 @@ def write_manifest(version_path: Path, manifest: IndexManifest) -> Path:
 
 
 def resolve_current(root: Path) -> Path:
-    """安全解析 current 文本指针并返回存在的版本目录。"""
+    """Safely resolve the current pointer to an existing version directory."""
     paths = IndexPaths.for_root(root)
     try:
         build_id = paths.current.read_text(encoding="utf-8").strip()
@@ -175,7 +175,7 @@ def validate_index_version(
     settings: Settings | None = None,
     expected_corpus_hash: str | None = None,
 ) -> IndexManifest:
-    """零云调用校验 manifest、Chroma 与 BM25 的一致性。"""
+    """Validate manifest, Chroma, and BM25 consistency without cloud calls."""
     path = Path(version_path)
     manifest = load_manifest(path)
     if expected_corpus_hash is not None and manifest.corpus_hash != expected_corpus_hash:
@@ -190,8 +190,8 @@ def validate_index_version(
         )
         if not expected:
             raise IndexUnavailable()
-        # 开发环境与部署镜像都必须携带原始语料快照；readiness 不允许
-        # 在缺文件时退化为只相信 index 内部的自声明指纹。
+        # Development and deployment images must include source corpus snapshots;
+        # readiness must not trust only index self-declared fingerprints.
         try:
             current_data_hashes = calculate_data_file_hashes(settings)
             source_records = load_records(settings)
@@ -254,7 +254,7 @@ def validate_index_version(
 
 
 def promote_staging(root: Path, build_id: str) -> Path:
-    """持久化 staging 后原子发布版本并切换 current 指针。"""
+    """Persist staging, atomically publish the version, and switch current."""
     paths = IndexPaths.for_root(root)
     staging = paths.staging(build_id)
     final = paths.version(build_id)
@@ -277,7 +277,7 @@ def promote_staging(root: Path, build_id: str) -> Path:
 
 
 def _validate_manifest_fields(manifest: IndexManifest) -> None:
-    """拒绝不符合当前索引协议的 manifest。"""
+    """Reject manifests that violate the current index protocol."""
     _validate_build_id(manifest.build_id)
     valid = (
         manifest.schema_version == INDEX_SCHEMA_VERSION
@@ -306,7 +306,7 @@ def _validate_manifest_fields(manifest: IndexManifest) -> None:
 def _validate_collection_metadata(
     metadata: Any, manifest: IndexManifest
 ) -> None:
-    """核对 Chroma 自身保存的 schema、语料与 embedding 契约。"""
+    """Validate the schema, corpus, and embedding contract stored by Chroma."""
     if not isinstance(metadata, dict):
         raise IndexUnavailable()
     expected = collection_metadata_for(manifest)
@@ -315,13 +315,13 @@ def _validate_collection_metadata(
 
 
 def _validate_build_id(build_id: str) -> None:
-    """防止 current 指针逃逸索引根目录。"""
+    """Prevent the current pointer from escaping the index root."""
     if not isinstance(build_id, str) or not _BUILD_ID_RE.fullmatch(build_id):
         raise IndexUnavailable()
 
 
 def _fsync_tree(root: Path) -> None:
-    """发布前持久化 staging 中的普通文件与目录。"""
+    """Persist regular files and directories in staging before publication."""
     for directory, _subdirs, files in os.walk(root, topdown=False):
         path = Path(directory)
         for name in files:
@@ -331,7 +331,7 @@ def _fsync_tree(root: Path) -> None:
 
 
 def _fsync_directory(path: Path) -> None:
-    """持久化目录项更新。"""
+    """Persist a directory-entry update."""
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)

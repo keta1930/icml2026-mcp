@@ -19,7 +19,7 @@ x-logging: &bounded-logging
     max-file: "3"
 
 x-app-security: &app-security
-  # 入口以 root 准备 0400 secret，降权后由 uid 10001 重建 runtime index。
+  # The root entrypoint prepares 0400 secrets, then uid 10001 rebuilds the runtime index.
   user: "0:0"
   read_only: true
   init: true

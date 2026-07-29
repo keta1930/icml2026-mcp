@@ -1,4 +1,4 @@
-"""测试夹具：用临时 SQLite 与假引擎保持核心测试完全离线。"""
+"""Offline fixtures backed by temporary SQLite state and a fake engine."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def make_paper(n: int, *, area: str = "Deep Learning", spotlight: bool = False) 
 
 
 class FakeEngine:
-    """按固定顺序返回论文的假引擎，得分随排名递减。"""
+    """Return papers in fixed order with scores decreasing by rank."""
 
     def __init__(self, papers: list[Paper]) -> None:
         self.papers = papers

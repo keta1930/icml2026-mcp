@@ -1,4 +1,4 @@
-"""Runtime SQLite 的连接、迁移与隐私 hash 基础设施。"""
+"""Runtime SQLite connection, migration, and privacy-hashing infrastructure."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ _MIGRATIONS = {
 
 
 class RuntimeDatabase:
-    """为每次操作创建线程内独占的 SQLite connection。"""
+    """Create a thread-exclusive SQLite connection for each operation."""
 
     def __init__(self, path: Path | str, *, busy_timeout_ms: int = 5_000) -> None:
         self.path = Path(path)
@@ -85,7 +85,7 @@ class RuntimeDatabase:
         self._closed = False
 
     def initialize(self) -> None:
-        """启用 WAL/FTS5 并幂等应用 runtime schema migration。"""
+        """Enable WAL/FTS5 and apply runtime schema migrations idempotently."""
         with self._initialize_lock:
             self._ensure_open()
             if self._initialized:
@@ -102,7 +102,7 @@ class RuntimeDatabase:
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        """返回只在当前调用线程使用的短生命周期 connection。"""
+        """Return a short-lived connection used only by the calling thread."""
         self.initialize()
         connection = self._open_connection()
         try:
@@ -112,7 +112,7 @@ class RuntimeDatabase:
 
     @contextmanager
     def transaction(self, mode: Literal["DEFERRED", "IMMEDIATE", "EXCLUSIVE"] = "IMMEDIATE") -> Iterator[sqlite3.Connection]:
-        """在短事务中执行纯 SQLite 工作并自动提交或回滚。"""
+        """Run pure SQLite work in a short transaction with automatic commit or rollback."""
         with self.connection() as connection:
             connection.execute(f"BEGIN {mode}")
             try:
@@ -124,13 +124,13 @@ class RuntimeDatabase:
                 connection.commit()
 
     def close(self) -> None:
-        """阻止后续连接；已退出的短连接无需额外回收。"""
+        """Prevent future connections; exited short-lived connections need no cleanup."""
         with self._initialize_lock:
             self._closed = True
 
     def _ensure_open(self) -> None:
         if self._closed:
-            raise RuntimeError("runtime database 已关闭")
+            raise RuntimeError("runtime database is closed")
 
     def _open_connection(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=self.busy_timeout_ms / 1_000, isolation_level=None)
@@ -146,14 +146,14 @@ class RuntimeDatabase:
             connection.execute("CREATE VIRTUAL TABLE temp.fts5_preflight USING fts5(text)")
             connection.execute("DROP TABLE temp.fts5_preflight")
         except sqlite3.OperationalError as exc:
-            raise RuntimeError("当前 Python SQLite 未启用 FTS5") from exc
+            raise RuntimeError("the current Python SQLite build does not include FTS5") from exc
 
     @staticmethod
     def _apply_migrations(connection: sqlite3.Connection) -> None:
         connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
         current = connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
         if current > SCHEMA_VERSION:
-            raise RuntimeError("runtime database schema 比当前程序更新")
+            raise RuntimeError("runtime database schema is newer than this application")
         for version in range(current + 1, SCHEMA_VERSION + 1):
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -170,25 +170,25 @@ class RuntimeDatabase:
 
 
 def hash_capability(token: str) -> str:
-    """不可逆摘要 session capability，禁止把 raw token 写入数据库。"""
+    """Irreversibly hash a session capability so raw tokens never enter the database."""
     if not token:
-        raise ValueError("capability token 不能为空")
+        raise ValueError("capability token must not be empty")
     return _sha256(b"icml-capability-v1\0" + token.encode())
 
 
 def hash_client_identity(identity: str, salt: str | bytes) -> str:
-    """用部署私有 salt 摘要来源身份，不保存原始 IP。"""
+    """Hash source identities with a deployment-private salt without storing raw IPs."""
     salt_bytes = salt.encode() if isinstance(salt, str) else salt
     if not identity.strip() or not salt_bytes:
-        raise ValueError("client identity 与 salt 不能为空")
+        raise ValueError("client identity and salt must not be empty")
     return _sha256(b"icml-client-v1\0" + salt_bytes + b"\0" + identity.strip().encode())
 
 
 def hash_query(query: str) -> str:
-    """规范空白后摘要 query，避免审计表保存原文。"""
+    """Normalize whitespace and hash a query so audit tables never store raw text."""
     normalized = " ".join(query.split())
     if not normalized:
-        raise ValueError("query 不能为空")
+        raise ValueError("query must not be empty")
     return _sha256(b"icml-query-v1\0" + normalized.encode())
 
 

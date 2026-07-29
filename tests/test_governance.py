@@ -1,4 +1,4 @@
-"""公共服务限流、预算、缓存与并发治理的离线验证。"""
+"""Offline validation of public-service rate, budget, cache, and concurrency controls."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _settings(tmp_path, **overrides) -> Settings:
 
 
 def test_rate_limit_is_atomic_and_persists_across_restart(tmp_path):
-    """IP burst 与日计数共享 SQLite，不因对象重建归零。"""
+    """Persist IP burst and daily counts in SQLite across object recreation."""
     settings = _settings(tmp_path)
     database = RuntimeDatabase(settings.state_db_path)
     limiter = SQLiteRateLimiter(database, settings)
@@ -66,7 +66,7 @@ def test_rate_limit_is_atomic_and_persists_across_restart(tmp_path):
 
 
 def test_session_open_limit_is_persistent_per_ip(tmp_path):
-    """session 创建按 IP 限制突发、分钟速率和 UTC 日总量。"""
+    """Limit session creation by IP burst, minute rate, and UTC daily total."""
     settings = _settings(
         tmp_path,
         ip_session_open_rate_per_minute=3,
@@ -91,7 +91,7 @@ def test_session_open_limit_is_persistent_per_ip(tmp_path):
 
 
 def test_budget_reserve_settle_release_and_unknown_usage(tmp_path):
-    """明确未发送释放；未知 usage 按预留值保守计费。"""
+    """Release unsent calls and conservatively charge unknown sent usage."""
     settings = _settings(tmp_path)
     ledger = SQLiteBudgetLedger(RuntimeDatabase(settings.state_db_path), settings)
     now = datetime(2026, 7, 28, tzinfo=timezone.utc)
@@ -112,7 +112,7 @@ def test_budget_reserve_settle_release_and_unknown_usage(tmp_path):
 
 
 def test_budget_overrun_is_recorded_and_fails_closed_after_restart(tmp_path):
-    """provider usage 超过保守预留时持久记录并熔断当期请求。"""
+    """Persist provider overruns and fail closed for the affected periods."""
     settings = _settings(tmp_path, daily_token_budget=20, monthly_token_budget=40)
     path = settings.state_db_path
     now = datetime(2026, 7, 28, tzinfo=timezone.utc)
@@ -137,7 +137,7 @@ def test_budget_overrun_is_recorded_and_fails_closed_after_restart(tmp_path):
 
 
 def test_query_budget_reservation_is_utf8_upper_bound():
-    """query 预留覆盖 UTF-8 bytes 并包含固定 provider 协议开销。"""
+    """Cover UTF-8 bytes and fixed provider protocol overhead in query reservations."""
     ascii_bound = query_token_upper_bound("abc")
     unicode_bound = query_token_upper_bound("衣服")
 
@@ -146,7 +146,7 @@ def test_query_budget_reservation_is_utf8_upper_bound():
 
 
 def test_cache_uses_hash_key_ttl_and_lru(tmp_path):
-    """缓存不保存 query，并按 TTL/LRU 留下最近两项。"""
+    """Do not cache raw queries and retain the two newest entries by TTL/LRU."""
     settings = _settings(tmp_path)
     database = RuntimeDatabase(settings.state_db_path)
     cache = EmbeddingCache(database, settings)
@@ -172,7 +172,7 @@ def test_cache_uses_hash_key_ttl_and_lru(tmp_path):
 
 
 def test_single_flight_merges_concurrent_operation():
-    """相同 key 的并发 miss 只执行一次 provider 操作。"""
+    """Execute one provider operation for concurrent misses on the same key."""
     flight = SingleFlight()
     lock = threading.Lock()
     calls = 0
@@ -197,7 +197,7 @@ class Batch:
 
 
 class FakeProvider:
-    """记录最大并发量的 usage-aware provider。"""
+    """Usage-aware provider that records maximum concurrency."""
 
     def __init__(self, dimension: int) -> None:
         self.dimension = dimension
@@ -224,7 +224,7 @@ class FakeProvider:
 
 
 def test_governed_encoder_caches_and_bounds_provider_concurrency(tmp_path):
-    """相同 query 合并且不同 query 的 provider in-flight 不越界。"""
+    """Coalesce identical queries and bound provider in-flight calls across queries."""
     settings = _settings(
         tmp_path,
         daily_token_budget=100,
@@ -250,7 +250,7 @@ def test_governed_encoder_caches_and_bounds_provider_concurrency(tmp_path):
 
 
 def test_admission_timeout_and_cancellation_release_capacity():
-    """等待超时与取消都会立即释放 admission 名额。"""
+    """Release admission capacity immediately on queue timeout or cancellation."""
 
     async def scenario() -> None:
         controller = AdmissionController(
@@ -287,7 +287,7 @@ def test_admission_timeout_and_cancellation_release_capacity():
 
 
 def test_admission_rejects_over_64_without_unbounded_waiters():
-    """active+waiting 总数严格为 64，额外突发不进入等待队列。"""
+    """Cap active-plus-waiting at 64 and reject excess bursts before queueing."""
 
     async def scenario() -> None:
         controller = AdmissionController(

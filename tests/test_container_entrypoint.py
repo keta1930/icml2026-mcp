@@ -1,4 +1,4 @@
-"""验证容器启动时的只读 canonical 与可写 runtime 索引边界。"""
+"""Validate read-only canonical and writable runtime index boundaries at startup."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _run_entrypoint(
     command_stubs: dict[str, str] | None = None,
     extra_environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """用测试目录执行真实容器入口。"""
+    """Run the real container entrypoint against test directories."""
     environment = _entrypoint_environment(
         canonical_root,
         state_root,
@@ -77,7 +77,7 @@ def _entrypoint_environment(
     command_stubs: dict[str, str] | None = None,
     extra_environment: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """构造可注入确定性 shell 命令的入口测试环境。"""
+    """Build an entrypoint test environment with deterministic shell commands."""
     environment = os.environ.copy()
     target_root = runtime_root or state_root / "runtime-index"
     if not prepare_runtime:
@@ -113,7 +113,7 @@ def _entrypoint_environment(
 
 
 def _write_minimal_version(root: Path, *, build_id: str = "v1-test") -> Path:
-    """写出用于入口边界测试的完整版本目录形状。"""
+    """Write a complete version-directory shape for entrypoint boundary tests."""
     version = root / "versions" / build_id
     (version / "chroma").mkdir(parents=True)
     (version / "manifest.json").write_text(
@@ -126,7 +126,7 @@ def _write_minimal_version(root: Path, *, build_id: str = "v1-test") -> Path:
 
 
 def _tree_fingerprint(root: Path) -> dict[str, tuple[int, int, str]]:
-    """记录普通文件的 mode、mtime 与内容摘要。"""
+    """Record a regular file's mode, mtime, and content digest."""
     result = {}
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
         metadata = path.stat()
@@ -139,7 +139,7 @@ def _tree_fingerprint(root: Path) -> dict[str, tuple[int, int, str]]:
 
 
 def _make_real_index(tmp_path: Path) -> tuple[Settings, Path]:
-    """创建无需 provider 的单论文 Chroma/FTS5 测试索引。"""
+    """Create a one-paper Chroma/FTS5 test index without provider access."""
     import chromadb
 
     data_dir = tmp_path / "data"
@@ -229,7 +229,7 @@ def _make_real_index(tmp_path: Path) -> tuple[Settings, Path]:
 
 
 def _set_tree_read_only(root: Path, read_only: bool) -> None:
-    """切换测试 canonical 树的写权限。"""
+    """Toggle write permissions on the test canonical tree."""
     directory_mode = 0o555 if read_only else 0o755
     file_mode = 0o444 if read_only else 0o644
     for path in sorted(root.rglob("*"), reverse=True):
@@ -238,7 +238,7 @@ def _set_tree_read_only(root: Path, read_only: bool) -> None:
 
 
 def _write_previous_runtime(state_root: Path) -> Path:
-    """写出可识别的上一代 runtime。"""
+    """Write a recognizable previous runtime generation."""
     runtime_root = state_root / "runtime-index"
     runtime_root.mkdir(parents=True)
     (runtime_root / "previous-generation").write_text("keep", encoding="utf-8")
@@ -246,7 +246,7 @@ def _write_previous_runtime(state_root: Path) -> Path:
 
 
 def _assert_no_publish_residue(state_root: Path) -> None:
-    """断言发布事务没有遗留 generation 或 backup。"""
+    """Assert that publication leaves no generation or backup artifacts."""
     assert not any(state_root.glob(".runtime-index.generation.*"))
     assert not (state_root / ".runtime-index.backup").exists()
 

@@ -1,4 +1,4 @@
-"""DashScope embedding payload、协议校验、重试与脱敏测试。"""
+"""DashScope embedding payload, protocol validation, retry, and sanitization tests."""
 
 from __future__ import annotations
 
@@ -168,7 +168,7 @@ def test_explicit_provider_quota_is_non_retryable_and_secret_free(
     combined = f"{caught.value!s} {caught.value!r} {public} {caplog.text}"
     assert caught.value.retryable is False
     assert caught.value.code == "embedding_quota_exhausted"
-    assert "请检查 DashScope 额度或付费设置" in public
+    assert "Check the DashScope quota or billing settings" in public
     assert calls == 1
     assert SENTINEL not in combined
 

@@ -1,4 +1,4 @@
-"""集中配置。所有值可通过 `ICML_PAPERS_` 前缀的环境变量覆盖。"""
+"""Central configuration, overridable through `ICML_PAPERS_` environment variables."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    """定义开源单节点服务的运行时边界。"""
+    """Define runtime boundaries for the open-source single-node service."""
 
     model_config = SettingsConfigDict(
         env_prefix="ICML_PAPERS_",
@@ -95,43 +95,43 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check(self) -> Settings:
-        """拒绝会破坏索引、费用或服务边界的配置组合。"""
+        """Reject combinations that would violate index, cost, or service boundaries."""
         if abs((self.dense_weight + self.bm25_weight) - 1.0) > 1e-9:
-            raise ValueError("dense_weight 与 bm25_weight 之和必须为 1")
+            raise ValueError("dense_weight and bm25_weight must sum to 1")
         if self.embedding_model == "qwen3.7-text-embedding" and self.embedding_dim != 1_024:
-            raise ValueError("qwen3.7-text-embedding 必须使用 1024 维索引契约")
+            raise ValueError("qwen3.7-text-embedding requires the 1024-dimensional index contract")
         if self.max_search_depth < self.max_top_k:
-            raise ValueError("max_search_depth 必须 >= max_top_k")
+            raise ValueError("max_search_depth must be >= max_top_k")
         if self.monthly_token_budget < self.daily_token_budget:
-            raise ValueError("monthly_token_budget 必须 >= daily_token_budget")
+            raise ValueError("monthly_token_budget must be >= daily_token_budget")
         if self.ip_rate_burst > self.ip_rate_per_minute:
-            raise ValueError("ip_rate_burst 不能大于 ip_rate_per_minute")
+            raise ValueError("ip_rate_burst must not exceed ip_rate_per_minute")
         if self.ip_session_open_burst > self.ip_session_open_rate_per_minute:
             raise ValueError(
-                "ip_session_open_burst 不能大于 "
+                "ip_session_open_burst must not exceed "
                 "ip_session_open_rate_per_minute"
             )
         if self.max_session_audit_records > self.max_session_rounds:
-            raise ValueError("max_session_audit_records 不能大于 max_session_rounds")
+            raise ValueError("max_session_audit_records must not exceed max_session_rounds")
         if self.index_root.resolve() == self.state_db_path.resolve():
-            raise ValueError("index_root 与 state_db_path 不能指向同一路径")
+            raise ValueError("index_root and state_db_path must not resolve to the same path")
         if self.trusted_proxy_enabled and not self.trusted_proxy_networks:
-            raise ValueError("启用 trusted proxy 时必须配置 trusted_proxy_networks")
+            raise ValueError("trusted_proxy_networks is required when trusted proxy mode is enabled")
         if any(not _valid_allowed_host(value) for value in self.allowed_hosts):
-            raise ValueError("allowed_hosts 必须是 host[:port] 或 host:* 格式")
+            raise ValueError("allowed_hosts entries must use host[:port] or host:* format")
         if any(not _valid_allowed_origin(value) for value in self.allowed_origins):
-            raise ValueError("allowed_origins 必须是 http(s) origin 或 :* 端口通配")
+            raise ValueError("allowed_origins entries must be HTTP(S) origins or use a :* port wildcard")
         parsed = urlparse(self.dashscope_http_base_url)
         host = (parsed.hostname or "").lower()
         beijing = host == "dashscope.aliyuncs.com" or host.endswith(
             ".cn-beijing.maas.aliyuncs.com"
         )
         if parsed.scheme != "https" or not beijing or parsed.path.rstrip("/") != "/api/v1":
-            raise ValueError("dashscope_http_base_url 必须是北京地域的 HTTPS native API")
+            raise ValueError("dashscope_http_base_url must be the Beijing-region HTTPS native API")
         return self
 
     def resolve_dashscope_api_key(self) -> str:
-        """按 secret 文件优先级解析 key，失败时只返回脱敏错误。"""
+        """Resolve the key with secret-file precedence and return only sanitized errors."""
         if self.dashscope_api_key_file is not None:
             try:
                 value = self.dashscope_api_key_file.read_text(encoding="utf-8").strip()
@@ -148,23 +148,23 @@ class Settings(BaseSettings):
 
     @property
     def index_path(self) -> Path:
-        """返回论文元数据快照路径。"""
+        """Return the paper metadata snapshot path."""
         return self.data_dir / "index.json"
 
     @property
     def abstracts_path(self) -> Path:
-        """返回论文摘要快照路径。"""
+        """Return the paper abstract snapshot path."""
         return self.data_dir / "abstracts.json"
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """返回进程默认配置。"""
+    """Return process-default settings."""
     return Settings()
 
 
 def _valid_allowed_host(value: str) -> bool:
-    """校验 FastMCP 支持的精确 host 或端口通配格式。"""
+    """Validate exact hosts or FastMCP-supported port wildcards."""
     item = value.strip()
     return bool(item) and "://" not in item and "/" not in item and (
         "*" not in item or item.endswith(":*") and item.count("*") == 1
@@ -172,7 +172,7 @@ def _valid_allowed_host(value: str) -> bool:
 
 
 def _valid_allowed_origin(value: str) -> bool:
-    """校验精确 HTTP origin，并仅允许端口位置使用通配。"""
+    """Validate exact HTTP origins, allowing wildcards only in the port position."""
     item = value.strip()
     parsed = urlparse(item[:-2] if item.endswith(":*") else item)
     wildcard_valid = "*" not in item or item.endswith(":*") and item.count("*") == 1

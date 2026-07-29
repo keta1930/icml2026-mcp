@@ -1,4 +1,4 @@
-"""验证 backend-neutral 领域模型。"""
+"""Validate backend-neutral domain models."""
 
 from __future__ import annotations
 

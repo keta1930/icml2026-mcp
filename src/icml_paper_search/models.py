@@ -1,4 +1,4 @@
-"""与具体向量数据库无关的论文、检索和 session 领域类型。"""
+"""Vector-database-neutral paper, retrieval, and session domain types."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ ARXIV_ABS = "https://arxiv.org/abs/{}"
 
 @dataclass(frozen=True, slots=True)
 class Paper:
-    """描述一篇 ICML 2026 论文的检索侧视图。"""
+    """Describe the retrieval-facing view of an ICML 2026 paper."""
     paper_id: str
     title: str
     abstract: str
@@ -26,7 +26,7 @@ class Paper:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> Paper:
-        """从 Chroma metadata 或 SQLite row 构造论文。"""
+        """Construct a paper from Chroma metadata or a SQLite row."""
         return cls(
             paper_id=str(value.get("paper_id", value.get("orid", "")) or ""),
             title=str(value.get("title", "") or ""),
@@ -41,17 +41,17 @@ class Paper:
 
     @property
     def openreview_url(self) -> str:
-        """返回论文的 OpenReview 页面。"""
+        """Return the paper's OpenReview page."""
         return OPENREVIEW_FORUM.format(self.paper_id)
 
     @property
     def arxiv_url(self) -> str:
-        """存在 arXiv id 时返回摘要页。"""
+        """Return the abstract page when an arXiv ID is available."""
         return ARXIV_ABS.format(self.arxiv_id) if self.arxiv_id else ""
 
 
 def _load_authors(raw: Any) -> list[str]:
-    """容错解析 metadata 中的作者列表。"""
+    """Parse an author list from metadata defensively."""
     if isinstance(raw, (list, tuple)):
         return [str(author) for author in raw]
     if not raw:
@@ -64,7 +64,7 @@ def _load_authors(raw: Any) -> list[str]:
 
 
 def _load_bool(raw: Any) -> bool:
-    """兼容 SQLite 整数和 Chroma 布尔 metadata。"""
+    """Accept SQLite integers and Chroma boolean metadata."""
     if isinstance(raw, str):
         return raw.strip().lower() in {"1", "true", "yes"}
     return bool(raw)
@@ -72,29 +72,29 @@ def _load_bool(raw: Any) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class SearchHit:
-    """表示一条带 `[0,1]` weighted RRF 得分的命中。"""
+    """Represent a hit with a weighted-RRF score in `[0,1]`."""
     paper: Paper
     score: float
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.score <= 1.0:
-            raise ValueError("SearchHit.score 必须在 [0,1] 内")
+            raise ValueError("SearchHit.score must be within [0,1]")
 
     @property
     def paper_id(self) -> str:
-        """返回命中的论文主键。"""
+        """Return the primary key of the matched paper."""
         return self.paper.paper_id
 
 
 @dataclass(frozen=True, slots=True)
 class SearchFilters:
-    """描述与检索后端无关的领域过滤条件。"""
+    """Describe domain filters independent of the retrieval backend."""
     area: str | None = None
     paper_type: str | None = None
     spotlight_only: bool = False
 
     def describe(self) -> str:
-        """返回面向用户的过滤条件摘要。"""
+        """Return a user-facing filter summary."""
         parts = [
             f"area={self.area}" if self.area else "",
             f"type={self.paper_type}" if self.paper_type else "",
@@ -104,13 +104,13 @@ class SearchFilters:
 
     @property
     def is_empty(self) -> bool:
-        """说明是否没有设置任何过滤条件。"""
+        """Return whether no filters are set."""
         return not (self.area or self.paper_type or self.spotlight_only)
 
 
 @dataclass(slots=True)
 class SearchOutcome:
-    """描述一次检索及其 session 去重统计。"""
+    """Describe one search and its session deduplication statistics."""
     query: str
     hits: list[SearchHit]
     search_depth: int
@@ -126,13 +126,13 @@ class SearchOutcome:
 
     @property
     def is_empty(self) -> bool:
-        """说明本轮是否没有返回新命中。"""
+        """Return whether this round produced no new hits."""
         return not self.hits
 
 
 @dataclass(frozen=True, slots=True)
 class QueryRecord:
-    """保存不含完整 query 的有界 session 审计记录。"""
+    """Store a bounded session audit record without the full query."""
     query_hash: str
     query_summary: str | None
     filters_desc: str
@@ -144,7 +144,7 @@ class QueryRecord:
 
 @dataclass(frozen=True, slots=True)
 class RoundCommit:
-    """返回与 SQLite 原子提交完全一致的一轮状态。"""
+    """Return round state exactly matching the atomic SQLite commit."""
     hits: list[SearchHit]
     duplicates_suppressed: int
     consecutive_empty_rounds: int
@@ -156,7 +156,7 @@ class RoundCommit:
 
 @dataclass(slots=True)
 class SessionSummary:
-    """描述一个 capability session 的有界对外快照。"""
+    """Describe a bounded public snapshot of a capability session."""
     session_id: str
     label: str
     created_at: datetime

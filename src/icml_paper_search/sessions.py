@@ -1,4 +1,4 @@
-"""SQLite capability session 的原子生命周期与去重操作。"""
+"""Atomic lifecycle and deduplication operations for SQLite capability sessions."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _utc_now() -> datetime:
 
 
 def _as_timestamp(value: datetime) -> float:
-    """把时区安全的时间转换为 SQLite 使用的 UTC timestamp。"""
+    """Convert a timezone-safe datetime to the UTC timestamp used by SQLite."""
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.timestamp()
@@ -30,7 +30,7 @@ def _as_datetime(value: float) -> datetime:
 
 @runtime_checkable
 class SessionStore(Protocol):
-    """定义不暴露可变 session 的原子持久化边界。"""
+    """Define atomic persistence boundaries without exposing mutable sessions."""
 
     def open(
         self,
@@ -83,7 +83,7 @@ class SessionStore(Protocol):
 
 
 class SQLiteSessionStore:
-    """用短 `BEGIN IMMEDIATE` 事务维护 session 的一致状态。"""
+    """Maintain consistent session state with short `BEGIN IMMEDIATE` transactions."""
 
     def __init__(self, database: RuntimeDatabase, settings: Settings | None = None) -> None:
         self._database = database
@@ -98,7 +98,7 @@ class SQLiteSessionStore:
         default_top_k: int | None,
         now: datetime,
     ) -> None:
-        """仅在回收过期项后仍有容量时创建 session。"""
+        """Create a session only when capacity remains after removing expired entries."""
         timestamp = _as_timestamp(now)
         cutoff = timestamp - self._settings.session_idle_ttl_seconds
         with self._database.transaction() as connection:
@@ -127,7 +127,7 @@ class SQLiteSessionStore:
         candidates_examined: int,
         now: datetime,
     ) -> RoundCommit:
-        """原子过滤已见项、登记返回项并提交轮次审计。"""
+        """Atomically filter seen items, record returns, and commit a round audit."""
         if wanted < 1:
             raise InvalidRequestError()
         timestamp = _as_timestamp(now)
@@ -135,7 +135,9 @@ class SQLiteSessionStore:
         with self._database.transaction() as connection:
             session = self._require_active(connection, token_hash, cutoff)
             if session["query_count"] >= self._settings.max_session_rounds:
-                raise InvalidRequestError(public_message="该检索会话已达到轮次上限。")
+                raise InvalidRequestError(
+                    public_message="The search session has reached its round limit."
+                )
 
             seen_rows = connection.execute(
                 "SELECT paper_id FROM session_seen WHERE token_hash = ?",
@@ -217,7 +219,7 @@ class SQLiteSessionStore:
         *,
         now: datetime,
     ) -> int:
-        """原子登记精确取回且实际存在的论文。"""
+        """Atomically record papers that were explicitly fetched and exist."""
         timestamp = _as_timestamp(now)
         cutoff = timestamp - self._settings.session_idle_ttl_seconds
         unique_by_id: dict[str, str] = {}
@@ -257,7 +259,7 @@ class SQLiteSessionStore:
         include_queries: bool,
         now: datetime,
     ) -> SessionSummary:
-        """读取有界快照并刷新 session 的活跃时间。"""
+        """Read a bounded snapshot and refresh the session activity time."""
         timestamp = _as_timestamp(now)
         cutoff = timestamp - self._settings.session_idle_ttl_seconds
         with self._database.transaction() as connection:
@@ -282,7 +284,7 @@ class SQLiteSessionStore:
         include_papers: bool,
         now: datetime,
     ) -> SessionSummary:
-        """在同一事务内读取最终摘要并删除 capability 状态。"""
+        """Read the final summary and delete capability state in one transaction."""
         timestamp = _as_timestamp(now)
         cutoff = timestamp - self._settings.session_idle_ttl_seconds
         with self._database.transaction() as connection:
@@ -299,7 +301,7 @@ class SQLiteSessionStore:
             return summary
 
     def cleanup_expired(self, *, now: datetime) -> int:
-        """删除超过严格 idle TTL 的 active session。"""
+        """Delete active sessions beyond the strict idle TTL."""
         cutoff = _as_timestamp(now) - self._settings.session_idle_ttl_seconds
         with self._database.transaction() as connection:
             return self._delete_expired(connection, cutoff)
@@ -383,7 +385,7 @@ class SQLiteSessionStore:
 
 
 class SessionManager:
-    """生成 raw capability，并在存储边界只使用其 SHA-256 摘要。"""
+    """Generate raw capabilities and use only their SHA-256 hashes in storage."""
 
     def __init__(
         self,
@@ -403,10 +405,10 @@ class SessionManager:
         self._clock = clock
 
     def open(self, label: str = "", default_top_k: int | None = None) -> SessionSummary:
-        """创建至少 256-bit 的不可枚举 capability session。"""
+        """Create an unenumerable capability session with at least 256 bits of entropy."""
         normalized_label = label.strip() or "untitled"
         if len(normalized_label) > self._settings.session_label_max_chars:
-            raise InvalidRequestError(public_message="会话标签过长。")
+            raise InvalidRequestError(public_message="The session label is too long.")
         token = f"ses_{secrets.token_urlsafe(32)}"
         now = self._clock()
         self._store.open(
@@ -440,7 +442,7 @@ class SessionManager:
         filters_desc: str,
         candidates_examined: int,
     ) -> RoundCommit:
-        """提交与本次返回严格一致的原子轮次。"""
+        """Commit an atomic round exactly matching the returned results."""
         return self._store.commit_round(
             self._token_hash(session_id),
             candidates,
@@ -453,7 +455,7 @@ class SessionManager:
         )
 
     def mark_ids_seen(self, session_id: str, papers: Iterable[tuple[str, str]]) -> int:
-        """登记精确取回的论文，并验证 capability 仍有效。"""
+        """Record explicitly fetched papers after validating the capability."""
         return self._store.mark_ids_seen(
             self._token_hash(session_id), papers, now=self._clock()
         )
@@ -465,7 +467,7 @@ class SessionManager:
         include_papers: bool = False,
         include_queries: bool = True,
     ) -> SessionSummary:
-        """返回调用方持有 capability 对应的有界状态。"""
+        """Return bounded state for a caller-held capability."""
         summary = self._store.status(
             self._token_hash(session_id),
             include_papers=include_papers,
@@ -476,7 +478,7 @@ class SessionManager:
         return summary
 
     def close(self, session_id: str, *, include_papers: bool = True) -> SessionSummary:
-        """关闭 capability 并返回有界最终摘要。"""
+        """Close a capability and return a bounded final summary."""
         summary = self._store.close(
             self._token_hash(session_id), include_papers=include_papers, now=self._clock()
         )
@@ -484,7 +486,7 @@ class SessionManager:
         return summary
 
     def cleanup_expired(self) -> int:
-        """触发显式 TTL 清理。"""
+        """Trigger explicit TTL cleanup."""
         return self._store.cleanup_expired(now=self._clock())
 
     @staticmethod

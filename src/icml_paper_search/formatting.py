@@ -1,8 +1,4 @@
-"""把检索结果渲染成紧凑文本。
-
-MCP 的返回值直接进 agent context，所以这里对 token 敏感：只输出决策必需的
-字段，摘要按配置截断，并显式给出去重统计让 agent 判断是否该换方向。
-"""
+"""Render search results as compact, token-conscious text for agent context."""
 
 from __future__ import annotations
 
@@ -18,7 +14,7 @@ def format_search_outcome(
     *,
     include_abstract: bool = True,
 ) -> str:
-    """渲染一次检索的结果与去重统计。"""
+    """Render one search result and its deduplication statistics."""
     cfg = settings or get_settings()
     lines = [_outcome_header(outcome)]
 
@@ -37,7 +33,7 @@ def format_search_outcome(
             )
         )
 
-    # 空结果时这条提示最有用，所以两种情况都要给。
+    # The continuation hint is most useful for empty results, but applies to both cases.
     if outcome.truncated:
         lines.append("")
         lines.append(_deeper_hint(outcome, cfg))
@@ -45,62 +41,68 @@ def format_search_outcome(
 
 
 def _deeper_hint(outcome: SearchOutcome, cfg: Settings) -> str:
-    """窗口填满但新条目不够时，告诉 agent 怎么继续往深处挖。"""
+    """Explain how to continue when a full window yields too few new results."""
     if outcome.search_depth >= cfg.max_search_depth:
         return (
-            f"注：检索窗口已到深度上限 {cfg.max_search_depth}，"
-            "该 query 能给的都给了；换个措辞或换子方向。"
+            f"Note: the search window has reached the maximum depth of "
+            f"{cfg.max_search_depth}. Rephrase the query or change direction."
         )
     return (
-        f"注：该 query 前 {outcome.search_depth} 条相关结果已看完。"
-        f"换措辞换方向通常更有效；确要在本方向深挖可把 search_depth 调到 "
-        f"{min(outcome.search_depth * 2, cfg.max_search_depth)}。"
+        f"Note: the first {outcome.search_depth} relevant results for this query "
+        "have been examined. Rephrasing or changing direction is usually more effective; "
+        f"to search deeper in this direction, set search_depth to "
+        f"{min(outcome.search_depth * 2, cfg.max_search_depth)}."
     )
 
 
 def _outcome_header(outcome: SearchOutcome) -> str:
-    """一行元信息，交代本轮新增 / 去重 / 会话累计。"""
+    """Render one metadata line with new, duplicate, window, and session counts."""
     parts = [f"query={outcome.query!r}"]
     if desc := outcome.filters.describe():
         parts.append(f"filters=({desc})")
-    parts.append(f"新增 {len(outcome.hits)} 条")
-    parts.append(f"去重隐藏 {outcome.duplicates_suppressed} 条")
-    parts.append(f"窗口 {outcome.candidates_examined}/{outcome.search_depth} 条")
+    parts.append(f"new={len(outcome.hits)}")
+    parts.append(f"duplicates_suppressed={outcome.duplicates_suppressed}")
+    parts.append(f"window={outcome.candidates_examined}/{outcome.search_depth}")
     parts.append("score=weighted-RRF[0,1]")
     if outcome.session_id:
-        parts.append(f"会话累计 {outcome.session_unique_total} 篇")
+        parts.append(f"session_total={outcome.session_unique_total}")
         if outcome.consecutive_empty_rounds:
-            parts.append(f"连续空轮 {outcome.consecutive_empty_rounds}")
+            parts.append(f"consecutive_empty_rounds={outcome.consecutive_empty_rounds}")
     else:
-        parts.append("无会话（未去重）")
+        parts.append("stateless (deduplication disabled)")
     return " | ".join(parts)
 
 
 def _empty_explanation(outcome: SearchOutcome) -> str:
-    """空结果的原因与下一步建议——这是会话机制最重要的信号。"""
+    """Explain an empty result and recommend the next action."""
     if outcome.candidates_examined == 0:
-        # 别把"被条件筛掉了"说成"语料里没有"。
+        # Do not describe results removed by filters as absent from the corpus.
         reasons = []
         if not outcome.filters.is_empty:
-            reasons.append("过滤条件可能过窄")
+            reasons.append("the filters may be too narrow")
         if outcome.min_score is not None:
-            reasons.append(f"min_score={outcome.min_score} 可能过高")
+            reasons.append(f"min_score={outcome.min_score} may be too high")
         if reasons:
-            return "检索无命中：" + "，".join(reasons) + "，可放宽后重试。"
-        return "检索无命中：该 query 在语料中没有匹配结果。"
+            return "No matches: " + "; ".join(reasons) + ". Relax them and try again."
+        return "No matches: this query has no matching results in the corpus."
     if not outcome.session_id:
-        return "检索无命中。"
+        return "No matches."
     base = (
-        f"零新增：本轮窗口内 {outcome.candidates_examined} 条命中"
-        "全部在此前轮次已返回，故不重复展示。"
+        f"No new results: all {outcome.candidates_examined} hits in this window "
+        "were returned in earlier rounds and have been suppressed."
     )
     if outcome.exhausted:
         return (
             base
-            + f" 已连续 {outcome.consecutive_empty_rounds} 轮零新增，"
-            "该方向可视为检索完毕，建议换研究主题或结束会话。"
+            + f" There have been {outcome.consecutive_empty_rounds} consecutive empty "
+            "rounds, so this direction is exhausted. Change the research topic or close "
+            "the session."
         )
-    return base + " 建议换个措辞或换子方向继续；再连续几轮为空即说明该方向已挖尽。"
+    return (
+        base
+        + " Rephrase the query or change direction; further consecutive empty rounds "
+        "indicate that this direction is exhausted."
+    )
 
 
 def format_papers(
@@ -109,9 +111,9 @@ def format_papers(
     *,
     missing_ids: list[str] | None = None,
 ) -> str:
-    """渲染精确取回的论文（不截断摘要）。"""
+    """Render exactly retrieved papers without truncating abstracts."""
     cfg = settings or get_settings()
-    lines = [f"取回 {len(papers)} 篇论文"]
+    lines = [f"Retrieved {len(papers)} paper(s)"]
     for paper in papers:
         lines.append("")
         lines.extend(
@@ -121,7 +123,7 @@ def format_papers(
         )
     if missing_ids:
         lines.append("")
-        lines.append(f"未找到的 id：{', '.join(missing_ids)}")
+        lines.append(f"IDs not found: {', '.join(missing_ids)}")
     return "\n".join(lines)
 
 
@@ -134,7 +136,7 @@ def _paper_lines(
     include_abstract: bool,
     full: bool = False,
 ) -> list[str]:
-    """单篇论文的紧凑展示块。"""
+    """Render a compact block for one paper."""
     prefix = f"[{index}] " if index else ""
     head = f"{prefix}{paper.title}"
     lines = [head]
@@ -148,11 +150,11 @@ def _paper_lines(
         meta.append("spotlight")
     if score is not None:
         meta.append(f"score={score:.4f}")
-    lines.append("    " + " · ".join(meta))
+    lines.append("    " + " | ".join(meta))
 
     if paper.authors and cfg.max_authors_shown:
         shown = list(paper.authors[: cfg.max_authors_shown])
-        tail = f" 等 {len(paper.authors)} 人" if len(paper.authors) > len(shown) else ""
+        tail = f" ({len(paper.authors)} authors total)" if len(paper.authors) > len(shown) else ""
         lines.append("    " + ", ".join(shown) + tail)
 
     links = [f"id={paper.paper_id}", paper.openreview_url]
@@ -173,41 +175,43 @@ def _paper_lines(
 def format_session_summary(
     summary: SessionSummary, *, title: str, include_session_id: bool = True
 ) -> str:
-    """渲染会话状态或关闭汇总。"""
-    heading = f"{title}：{summary.session_id}" if include_session_id else title
+    """Render a session status or closure summary."""
+    heading = f"{title}: {summary.session_id}" if include_session_id else title
     lines = [
         heading,
         f"    label={summary.label or 'untitled'}",
-        f"    创建于 {_ts(summary.created_at)}，最后活跃 {_ts(summary.last_active_at)}",
-        f"    query {summary.query_count} 次，去重后累计 {summary.unique_papers} 篇论文",
+        f"    created_at={_ts(summary.created_at)}, last_active_at={_ts(summary.last_active_at)}",
+        f"    queries={summary.query_count}, unique_papers={summary.unique_papers}",
     ]
     if summary.default_top_k:
-        lines.append(f"    默认 top_k={summary.default_top_k}")
+        lines.append(f"    default_top_k={summary.default_top_k}")
     if summary.consecutive_empty_rounds:
-        state = "已判定检索完毕" if summary.exhausted else "接近挖尽"
-        lines.append(f"    连续空轮 {summary.consecutive_empty_rounds}（{state}）")
+        state = "exhausted" if summary.exhausted else "nearly exhausted"
+        lines.append(
+            f"    consecutive_empty_rounds={summary.consecutive_empty_rounds} ({state})"
+        )
 
     if summary.queries:
         lines.append("")
-        lines.append("query 轨迹：")
+        lines.append("Query history:")
         for n, record in enumerate(summary.queries, 1):
-            suffix = f"，filters=({record.filters_desc})" if record.filters_desc else ""
+            suffix = f", filters=({record.filters_desc})" if record.filters_desc else ""
             query_label = record.query_summary or f"hash:{record.query_hash[:12]}"
             lines.append(
-                f"  {n}. {query_label} → 新增 {record.new_hits}，"
-                f"去重 {record.duplicates_suppressed}，"
-                f"候选 {record.candidates_examined}{suffix}"
+                f"  {n}. {query_label} -> new={record.new_hits}, "
+                f"duplicates_suppressed={record.duplicates_suppressed}, "
+                f"candidates_examined={record.candidates_examined}{suffix}"
             )
         if summary.audit_truncated:
-            lines.append("  … query 审计记录已按安全上限截断")
+            lines.append("  ... Query history was truncated at the safety limit.")
 
     if summary.papers:
         lines.append("")
-        lines.append(f"已检索论文（{len(summary.papers)} 篇）：")
+        lines.append(f"Retrieved papers ({len(summary.papers)}):")
         for n, (paper_id, paper_title) in enumerate(summary.papers, 1):
             lines.append(f"  {n}. [{paper_id}] {paper_title}")
         if summary.papers_truncated:
-            lines.append("  … 论文清单已按输出上限截断")
+            lines.append("  ... The paper list was truncated at the output limit.")
     return "\n".join(lines)
 
 

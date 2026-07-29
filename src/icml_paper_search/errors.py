@@ -1,13 +1,13 @@
-"""稳定、脱敏的应用错误契约。"""
+"""Stable, sanitized application error contract."""
 
 from __future__ import annotations
 
 
 class AppError(Exception):
-    """携带公开错误码但不暴露内部异常细节。"""
+    """Carry a public error code without exposing internal exception details."""
 
     code = "internal_error"
-    public_message = "服务暂时不可用，请稍后重试。"
+    public_message = "The service is temporarily unavailable. Please try again later."
     retryable = False
 
     def __init__(self, *, code: str | None = None, public_message: str | None = None,
@@ -22,81 +22,85 @@ class AppError(Exception):
 
 
 class InvalidRequestError(AppError):
-    """表示客户端参数不符合公开契约。"""
+    """Indicate that client parameters violate the public contract."""
     code = "invalid_request"
-    public_message = "请求参数无效。"
+    public_message = "The request parameters are invalid."
 
 
 class SessionNotFoundError(AppError):
-    """统一隐藏错误、过期或已关闭的 session token。"""
+    """Hide invalid, expired, and closed session tokens behind one error."""
     code = "session_not_found"
-    public_message = "检索会话不存在或已失效。"
+    public_message = "The search session does not exist or is no longer valid."
 
 
 class SessionCapacityReached(AppError):
-    """表示当前不能再创建业务 session。"""
+    """Indicate that no additional business sessions can be created."""
     code = "session_capacity_reached"
-    public_message = "检索会话已达容量上限，请稍后重试。"
+    public_message = "Search session capacity has been reached. Please try again later."
     retryable = True
 
 
 class RateLimited(AppError):
-    """表示调用方或全局速率已达到上限。"""
+    """Indicate that a caller or global rate limit has been reached."""
     code = "rate_limited"
-    public_message = "请求过于频繁，请稍后重试。"
+    public_message = "Too many requests. Please try again later."
     retryable = True
 
 
 class ServerBusy(AppError):
-    """表示有界执行队列没有可用容量。"""
+    """Indicate that the bounded execution queue has no available capacity."""
     code = "server_busy"
-    public_message = "服务当前繁忙，请稍后重试。"
+    public_message = "The service is currently busy. Please try again later."
     retryable = True
 
 
 class BudgetExhausted(AppError):
-    """表示在线 embedding Token 预算已经耗尽。"""
+    """Indicate that the online embedding token budget is exhausted."""
     code = "budget_exhausted"
-    public_message = "今日或本月的检索额度已用尽。"
+    public_message = "The daily or monthly search budget has been exhausted."
 
 
 class EmbeddingUnavailable(AppError):
-    """表示 embedding provider 暂时或永久不可用。"""
+    """Indicate that the embedding provider is temporarily or permanently unavailable."""
     code = "embedding_unavailable"
-    public_message = "文本向量服务暂时不可用。"
+    public_message = "The text embedding service is temporarily unavailable."
     retryable = True
 
 
 class EmbeddingRateLimited(EmbeddingUnavailable):
-    """表示 provider 返回可重试的限流。"""
+    """Indicate a retryable provider rate limit."""
 
 
 class EmbeddingQuotaExhausted(EmbeddingUnavailable):
-    """表示 provider 账户额度已耗尽且继续重试无效。"""
+    """Indicate exhausted provider quota for which retries cannot help."""
     code = "embedding_quota_exhausted"
-    public_message = "文本向量服务额度已耗尽，请检查 DashScope 额度或付费设置。"
+    public_message = (
+        "The text embedding service quota has been exhausted. "
+        "Check the DashScope quota or billing settings."
+    )
     retryable = False
 
 
 class EmbeddingConfigurationError(EmbeddingUnavailable):
-    """表示服务端 embedding secret 或地域配置缺失。"""
-    public_message = "文本向量服务尚未配置。"
+    """Indicate a missing server-side embedding secret or region configuration."""
+
+    public_message = "The text embedding service is not configured."
     retryable = False
 
 
 class EmbeddingProtocolError(EmbeddingUnavailable):
-    """表示 provider 响应不符合向量契约。"""
+    """Indicate that a provider response violates the vector contract."""
     retryable = False
 
 
 class IndexUnavailable(AppError):
-    """表示本地索引不存在、损坏或版本不一致。"""
+    """Indicate that the local index is missing, corrupt, or version-incompatible."""
     code = "index_unavailable"
-    public_message = "论文索引尚未就绪。"
+    public_message = "The paper index is not ready."
 
 
 def public_error_text(exc: BaseException) -> str:
-    """把任意异常映射为不含内部 message 的公开短文本。"""
+    """Map any exception to a short public message without internal details."""
     if isinstance(exc, AppError):
         error = exc
     elif isinstance(exc, (TypeError, ValueError)):

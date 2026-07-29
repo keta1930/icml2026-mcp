@@ -1,4 +1,4 @@
-"""异步 FastMCP 入口：有界 offload、匿名治理与安全错误边界。"""
+"""Async FastMCP entry point with bounded offload and safe public error boundaries."""
 
 from __future__ import annotations
 
@@ -29,20 +29,18 @@ from .state import RuntimeDatabase
 logger = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
-ICML 2026 论文库（6341 篇）的 Chroma dense + SQLite BM25 混合检索。
-
-用 capability session 做主题调研：
-1. `open_search_session` 创建会话并妥善保存 session_id；
-2. 带同一 session_id 多次调用 `search_papers`，已返回论文不会重复；
-3. 连续空轮表示当前检索方向接近挖尽，可换措辞、调大 search_depth 或结束会话。
-
-不传 session_id 时是无状态检索。匿名服务不会列出其他调用方的 session。\
+Hybrid search over 6,341 ICML 2026 papers using Chroma dense retrieval and SQLite BM25.
+For multi-round research, create a capability session, keep its `session_id` private, and
+reuse it across `search_papers` calls so previously returned papers are suppressed.
+Consecutive empty rounds indicate that the current direction may be exhausted; rephrase
+the query, increase `search_depth`, or close the session. Without a `session_id`, searches
+are stateless. Anonymous callers cannot enumerate other sessions.\
 """
 
 
 @dataclass(slots=True)
 class ApplicationResources:
-    """在 ASGI 进程 lifespan 中一次创建并统一关闭共享资源。"""
+    """Create and close shared resources once within the ASGI process lifespan."""
 
     settings: Settings
     database: RuntimeDatabase | None = None
@@ -54,11 +52,11 @@ class ApplicationResources:
     _closed: bool = False
 
     def initialize(self) -> None:
-        """初始化 state 与延迟客户端，不触发 DashScope 调用。"""
+        """Initialize state and lazy clients without calling DashScope."""
         if self.initialized:
             return
         if self._closed:
-            raise RuntimeError("application resources 已关闭")
+            raise RuntimeError("application resources are closed")
         try:
             database = self.database or RuntimeDatabase(
                 self.settings.state_db_path,
@@ -89,7 +87,7 @@ class ApplicationResources:
             raise
 
     def readiness(self) -> None:
-        """只检查本地 state/index，不读取 key 或访问 provider。"""
+        """Check only local state and index without reading a key or calling the provider."""
         self._require_initialized()
         assert self.database is not None
         assert self.service is not None
@@ -98,7 +96,7 @@ class ApplicationResources:
         self.service.validate()
 
     def close(self) -> None:
-        """按依赖顺序关闭引擎/provider 与 runtime database。"""
+        """Close the engine, provider, and runtime database in dependency order."""
         if self._closed:
             return
         self._closed = True
@@ -114,18 +112,18 @@ class ApplicationResources:
 
     def _require_initialized(self) -> None:
         if not self.initialized:
-            raise RuntimeError("application resources 尚未初始化")
+            raise RuntimeError("application resources are not initialized")
 
 
 class ApplicationFastMCP(FastMCP):
-    """组合 ASGI 进程资源与 FastMCP session-manager lifespan。"""
+    """Compose ASGI process resources with the FastMCP session-manager lifespan."""
 
     def __init__(self, *args: Any, resources: ApplicationResources, **kwargs: Any):
         self._icml_resources = resources
         super().__init__(*args, **kwargs)
 
     def streamable_http_app(self) -> Starlette:
-        """创建同时管理进程资源与 Streamable HTTP session 的 ASGI app。"""
+        """Create an ASGI app managing process resources and Streamable HTTP sessions."""
         app = super().streamable_http_app()
         session_manager_lifespan = app.router.lifespan_context
         resources = self._icml_resources
@@ -148,7 +146,7 @@ def create_mcp(
     *,
     resources: ApplicationResources | None = None,
 ) -> FastMCP:
-    """构造可注入测试资源的单进程 FastMCP server。"""
+    """Construct a single-process FastMCP server with injectable test resources."""
     config = settings or get_settings()
     app_resources = resources or ApplicationResources(config)
 
@@ -178,39 +176,49 @@ def create_mcp(
             return JSONResponse({"status": "not_ready"}, status_code=503)
         return JSONResponse({"status": "ready"})
 
-    # 测试和嵌入式部署可读取资源句柄，但它不会进入 MCP schema。
+    # Tests and embedded deployments may inspect this handle; it is excluded from MCP schema.
     setattr(server, "_icml_resources", app_resources)
     return server
 
 
 def _register_tools(server: FastMCP) -> None:
-    """注册六个兼容名称的 async MCP tool。"""
+    """Register the six compatibility-stable asynchronous MCP tools."""
     server.tool(
-        title="开启检索会话",
-        description="创建不可枚举的 capability session，供后续多轮检索自动去重。",
+        title="Open Search Session",
+        description=(
+            "Create an unenumerable capability session for automatic deduplication "
+            "across search rounds."
+        ),
     )(open_search_session)
     server.tool(
-        title="检索论文",
+        title="Search Papers",
         description=(
-            "用 Chroma dense + SQLite BM25 weighted-RRF 检索 ICML 2026 论文；"
-            "带 session_id 时只返回该会话未见论文。"
+            "Search ICML 2026 papers with Chroma dense retrieval and SQLite BM25 "
+            "weighted RRF; with `session_id`, return only papers not yet seen in "
+            "that session."
         ),
     )(search_papers)
     server.tool(
-        title="关闭检索会话",
-        description="关闭 capability session 并返回有界检索汇总。",
+        title="Close Search Session",
+        description="Close a capability session and return a bounded search summary.",
     )(close_search_session)
     server.tool(
-        title="查看会话状态",
-        description="按 session_id 查看单个会话；匿名模式禁止无参枚举。",
+        title="Search Session Status",
+        description=(
+            "Inspect one capability session by `session_id`; anonymous callers cannot "
+            "enumerate sessions."
+        ),
     )(search_session_status)
     server.tool(
-        title="按 id 取论文",
-        description="按 OpenReview id 精确取回完整摘要，可原子登记到会话去重集。",
+        title="Get Papers",
+        description=(
+            "Fetch full abstracts by OpenReview ID and optionally mark the papers as seen "
+            "in a capability session atomically."
+        ),
     )(get_papers)
     server.tool(
-        title="列出可过滤维度",
-        description="列出语料的 area 与 paper_type 取值及分布。",
+        title="List Paper Areas",
+        description="List available `area` and `paper_type` values with corpus counts.",
     )(list_paper_areas)
 
 
@@ -218,14 +226,19 @@ async def open_search_session(
     ctx: Context,
     label: Annotated[
         str,
-        Field(default="", max_length=120, description="会话主题标签"),
+        Field(default="", max_length=120, description="Optional topic label for the session."),
     ] = "",
     default_top_k: Annotated[
         int | None,
-        Field(default=None, ge=1, le=50, description="该会话默认每轮返回数"),
+        Field(
+            default=None,
+            ge=1,
+            le=50,
+            description="Default number of results returned per round for this session.",
+        ),
     ] = None,
 ) -> str:
-    """异步开启 capability session。"""
+    """Open a capability session asynchronously."""
     resources = _resources(ctx)
 
     async def operation() -> str:
@@ -243,8 +256,9 @@ async def open_search_session(
             ),
         )
         return (
-            format_session_summary(summary, title="已开启检索会话")
-            + "\n\n请妥善保存该 session_id；匿名服务无法替你列出或找回它。"
+            format_session_summary(summary, title="Search session opened")
+            + "\n\nKeep this session_id private; the anonymous service cannot list or "
+            "recover it for you."
         )
 
     return await _safe_tool_call(operation)
@@ -254,33 +268,47 @@ async def search_papers(
     ctx: Context,
     query: Annotated[
         str,
-        Field(min_length=1, max_length=2_000, description="自然语言研究主题或方法"),
+        Field(
+            min_length=1,
+            max_length=2_000,
+            description="Natural-language research topic or method.",
+        ),
     ],
     session_id: Annotated[
-        str | None, Field(default=None, description="capability session id")
+        str | None,
+        Field(
+            default=None,
+            description="Capability session ID used for persistent deduplication.",
+        ),
     ] = None,
     top_k: Annotated[
-        int | None, Field(default=None, ge=1, le=50, description="返回的新论文数上限")
+        int | None,
+        Field(default=None, ge=1, le=50, description="Maximum number of new papers to return."),
     ] = None,
     search_depth: Annotated[
-        int | None, Field(default=None, ge=1, description="固定相关性窗口深度")
+        int | None, Field(default=None, ge=1, description="Fixed relevance-window depth.")
     ] = None,
-    area: Annotated[str | None, Field(default=None, description="研究领域过滤")] = None,
+    area: Annotated[str | None, Field(default=None, description="Research area filter.")] = None,
     paper_type: Annotated[
-        str | None, Field(default=None, description="论文类型过滤")
+        str | None, Field(default=None, description="Paper type filter.")
     ] = None,
     spotlight_only: Annotated[
-        bool, Field(default=False, description="只返回 spotlight 论文")
+        bool, Field(default=False, description="Return only spotlight papers.")
     ] = False,
     min_score: Annotated[
         float | None,
-        Field(default=None, ge=0.0, le=1.0, description="weighted-RRF 得分下限"),
+        Field(
+            default=None,
+            ge=0.0,
+            le=1.0,
+            description="Minimum normalized weighted-RRF score.",
+        ),
     ] = None,
     include_abstract: Annotated[
-        bool, Field(default=True, description="是否附带摘要摘录")
+        bool, Field(default=True, description="Include abstract previews in the result.")
     ] = True,
 ) -> str:
-    """异步执行有治理的 fixed-window 混合检索。"""
+    """Run governed fixed-window hybrid search asynchronously."""
     resources = _resources(ctx)
     filters = SearchFilters(
         area=area, paper_type=paper_type, spotlight_only=spotlight_only
@@ -319,9 +347,11 @@ async def search_papers(
 
 async def close_search_session(
     ctx: Context,
-    session_id: Annotated[str, Field(min_length=1, description="要关闭的 session id")],
+    session_id: Annotated[
+        str, Field(min_length=1, description="Capability session ID to close.")
+    ],
 ) -> str:
-    """异步关闭 session 并返回安全汇总。"""
+    """Close a session asynchronously and return a safe summary."""
     resources = _resources(ctx)
 
     async def operation() -> str:
@@ -329,7 +359,7 @@ async def close_search_session(
             resources, lambda: _service(resources).close_session(session_id)
         )
         return format_session_summary(
-            summary, title="已关闭检索会话", include_session_id=False
+            summary, title="Search session closed", include_session_id=False
         )
 
     return await _safe_tool_call(operation)
@@ -338,18 +368,18 @@ async def close_search_session(
 async def search_session_status(
     ctx: Context,
     session_id: Annotated[
-        str | None, Field(default=None, description="要查看的 capability session id")
+        str | None, Field(default=None, description="Capability session ID to inspect.")
     ] = None,
     include_papers: Annotated[
-        bool, Field(default=False, description="是否列出有界论文标题清单")
+        bool, Field(default=False, description="Include a bounded list of paper titles.")
     ] = False,
 ) -> str:
-    """异步查看单个 session，拒绝匿名全局枚举。"""
+    """Inspect one session asynchronously while rejecting anonymous enumeration."""
     resources = _resources(ctx)
 
     async def operation() -> str:
         if session_id is None:
-            raise InvalidRequestError(public_message="必须提供 session_id。")
+            raise InvalidRequestError(public_message="`session_id` is required.")
         summary = await _run_state(
             resources,
             lambda: _service(resources).session_status(
@@ -357,7 +387,7 @@ async def search_session_status(
             ),
         )
         return format_session_summary(
-            summary, title="检索会话状态", include_session_id=False
+            summary, title="Search session status", include_session_id=False
         )
 
     return await _safe_tool_call(operation)
@@ -367,13 +397,19 @@ async def get_papers(
     ctx: Context,
     paper_ids: Annotated[
         list[str],
-        Field(min_length=1, max_length=50, description="OpenReview id 列表"),
+        Field(min_length=1, max_length=50, description="OpenReview paper IDs."),
     ],
     session_id: Annotated[
-        str | None, Field(default=None, description="登记到该 capability session")
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Capability session in which returned papers are atomically marked as seen."
+            ),
+        ),
     ] = None,
 ) -> str:
-    """异步取回论文并原子登记 session seen。"""
+    """Fetch papers asynchronously and atomically record session-seen state."""
     resources = _resources(ctx)
 
     async def operation() -> str:
@@ -391,7 +427,7 @@ async def get_papers(
 
 
 async def list_paper_areas(ctx: Context) -> str:
-    """在线程池中读取静态语料维度。"""
+    """Read static corpus dimensions in a worker thread."""
     resources = _resources(ctx)
 
     async def operation() -> str:
@@ -403,7 +439,7 @@ async def list_paper_areas(ctx: Context) -> str:
 
 
 async def _safe_tool_call(operation: Callable[[], Any]) -> str:
-    """只返回公开短码，服务端日志也不写异常 message。"""
+    """Return only public short codes and omit exception messages from server logs."""
     try:
         return await operation()
     except Exception as exc:
@@ -417,24 +453,24 @@ async def _safe_tool_call(operation: Callable[[], Any]) -> str:
 
 
 async def _run_search(resources: ApplicationResources, operation: Callable[[], Any]):
-    """把完整同步搜索放入有界 search worker。"""
+    """Run a complete synchronous search in a bounded search worker."""
     resources._require_initialized()
     assert resources.limiters is not None
     return await anyio.to_thread.run_sync(operation, limiter=resources.limiters.search)
 
 
 async def _run_state(resources: ApplicationResources, operation: Callable[[], Any]):
-    """把短 SQLite/catalog 操作放入独立 state worker。"""
+    """Run short SQLite or catalog operations in a separate state worker."""
     resources._require_initialized()
     assert resources.limiters is not None
     return await anyio.to_thread.run_sync(operation, limiter=resources.limiters.state)
 
 
 def _resources(ctx: Context) -> ApplicationResources:
-    """从稳定的进程级 FastMCP 容器取得共享资源。"""
+    """Get shared resources from the stable process-level FastMCP container."""
     resources = getattr(ctx.fastmcp, "_icml_resources", None)
     if not isinstance(resources, ApplicationResources):
-        raise RuntimeError("FastMCP application resources 无效")
+        raise RuntimeError("FastMCP application resources are invalid")
     resources._require_initialized()
     return resources
 
@@ -446,7 +482,7 @@ def _service(resources: ApplicationResources) -> PaperSearchService:
 
 
 def _resolve_client_ip(ctx: Context, settings: Settings) -> str:
-    """默认使用 peer，仅对可信私网代理接受固定覆盖 header。"""
+    """Use the peer by default and accept the override header only from trusted proxies."""
     request = ctx.request_context.request
     peer = "unknown"
     if isinstance(request, Request) and request.client is not None:
@@ -475,7 +511,7 @@ def _in_trusted_network(peer: str, networks: tuple[str, ...]) -> bool:
 
 
 def _transport_security(settings: Settings) -> TransportSecuritySettings:
-    """为直连、本地和 mita TLS sidecar 配置 Host/Origin 白名单。"""
+    """Configure Host and Origin allowlists for direct, local, and TLS-sidecar access."""
     host = settings.server_host
     port = settings.server_port
     return TransportSecuritySettings(
@@ -489,7 +525,7 @@ mcp = create_mcp()
 
 
 def main() -> None:
-    """用单进程 Streamable HTTP 启动 MCP server。"""
+    """Start the MCP server with single-process Streamable HTTP."""
     settings = get_settings()
     logging.basicConfig(
         level=logging.INFO,

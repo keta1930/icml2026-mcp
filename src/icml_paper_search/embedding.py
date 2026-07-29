@@ -1,4 +1,4 @@
-"""通过 DashScope 为查询与论文文档生成 dense embedding。"""
+"""Generate dense embeddings for queries and paper documents through DashScope."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ _QUOTA_EXHAUSTED_RESPONSES = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingBatch:
-    """一次或多次 provider 调用产生的向量和实际 Token 用量。"""
+    """Vectors and actual token usage from one or more provider calls."""
 
     vectors: tuple[tuple[float, ...], ...]
     total_tokens: int
@@ -41,7 +41,7 @@ class EmbeddingBatch:
 
 @runtime_checkable
 class TextEncoder(Protocol):
-    """检索侧需要的最小同步编码能力。"""
+    """Minimal synchronous encoding capability required by retrieval."""
 
     def encode_query(self, text: str) -> list[float]: ...
 
@@ -51,7 +51,7 @@ class TextEncoder(Protocol):
 
 
 class DashScopeEncoder:
-    """DashScope qwen3.7 embedding 的同步、可测试封装。"""
+    """Synchronous, testable wrapper for DashScope qwen3.7 embeddings."""
 
     def __init__(
         self,
@@ -72,33 +72,33 @@ class DashScopeEncoder:
         self._sessions_lock = threading.Lock()
 
     def encode_query(self, text: str) -> list[float]:
-        """以 query 语义编码单条检索文本。"""
+        """Encode one search text with query semantics."""
         result = self.encode_query_with_usage(text)
         return list(result.vectors[0])
 
     def encode_query_with_usage(self, text: str) -> EmbeddingBatch:
-        """编码查询并返回 provider 报告的 Token 用量。"""
+        """Encode a query and return provider-reported token usage."""
         if not isinstance(text, str) or not text.strip():
-            raise ValueError("query 不能为空")
+            raise ValueError("query must not be empty")
         return self._encode_batch([text], text_type="query")
 
     def encode_documents(
         self, texts: Sequence[str], *, show_progress: bool = False
     ) -> list[list[float]]:
-        """按 provider 批次上限编码文档并保持输入顺序。"""
+        """Encode documents within provider batch limits while preserving input order."""
         result = self.encode_documents_with_usage(texts, show_progress=show_progress)
         return [list(vector) for vector in result.vectors]
 
     def encode_documents_with_usage(
         self, texts: Sequence[str], *, show_progress: bool = False
     ) -> EmbeddingBatch:
-        """分批编码文档并汇总实际 Token 用量。"""
-        del show_progress  # 云端批调用没有本地模型进度条。
+        """Encode documents in batches and aggregate actual token usage."""
+        del show_progress  # Cloud batch calls do not expose local-model progress.
         items = list(texts)
         if not items:
             return EmbeddingBatch(vectors=(), total_tokens=0)
         if any(not isinstance(text, str) or not text.strip() for text in items):
-            raise ValueError("document 不能为空")
+            raise ValueError("document must not be empty")
 
         vectors: list[tuple[float, ...]] = []
         total_tokens = 0
@@ -112,9 +112,9 @@ class DashScopeEncoder:
         return EmbeddingBatch(vectors=tuple(vectors), total_tokens=total_tokens)
 
     def _encode_batch(self, texts: list[str], *, text_type: str) -> EmbeddingBatch:
-        """执行一个不超过 20 条的 provider 批次。"""
+        """Execute one provider batch of at most 20 inputs."""
         if len(texts) > 20:
-            raise ValueError("单批 embedding 输入不能超过 20 条")
+            raise ValueError("an embedding batch must not exceed 20 inputs")
         cfg = self._settings
         api_key = cfg.resolve_dashscope_api_key()
         response = self._call_with_retry(
@@ -129,7 +129,7 @@ class DashScopeEncoder:
         return self._parse_response(response, expected_count=len(texts))
 
     def _call_with_retry(self, **payload: Any) -> Any:
-        """在总 deadline 内仅重试临时网络和 HTTP 故障。"""
+        """Retry only transient network and HTTP failures within the total deadline."""
         cfg = self._settings
         started = self._monotonic()
         call = self._call or self._default_call
@@ -174,7 +174,7 @@ class DashScopeEncoder:
         raise EmbeddingUnavailable()
 
     def _backoff(self, attempt: int, started: float) -> None:
-        """执行受总 deadline 约束的 full-jitter 退避。"""
+        """Apply full-jitter backoff bounded by the total deadline."""
         remaining = self._settings.embedding_deadline_seconds - (
             self._monotonic() - started
         )
@@ -184,7 +184,7 @@ class DashScopeEncoder:
         self._sleep(self._random_uniform(0.0, ceiling))
 
     def _parse_response(self, response: Any, *, expected_count: int) -> EmbeddingBatch:
-        """校验 provider 响应顺序、维度、数值和 usage。"""
+        """Validate provider response order, dimensions, values, and usage."""
         output = _field(response, "output")
         embeddings = _field(output, "embeddings")
         if not isinstance(embeddings, Sequence) or isinstance(embeddings, (str, bytes)):
@@ -228,7 +228,7 @@ class DashScopeEncoder:
         )
 
     def close(self) -> None:
-        """关闭各工作线程持有的 HTTP Session。"""
+        """Close HTTP sessions held by worker threads."""
         with self._sessions_lock:
             sessions, self._sessions = self._sessions, set()
         for session in sessions:
@@ -239,7 +239,7 @@ class DashScopeEncoder:
             close()
 
     def _default_call(self, **payload: Any) -> Any:
-        """按工作线程复用连接并延迟导入 DashScope SDK。"""
+        """Reuse connections per worker thread and lazily import the DashScope SDK."""
         import dashscope
         import requests
 
@@ -253,7 +253,7 @@ class DashScopeEncoder:
 
 
 def _response_status(response: Any) -> int:
-    """兼容 SDK object 与测试 mapping 的状态字段。"""
+    """Read status fields from SDK objects or test mappings."""
     status = _field(response, "status_code")
     if isinstance(status, HTTPStatus):
         return int(status)
@@ -263,14 +263,14 @@ def _response_status(response: Any) -> int:
 
 
 def _field(container: Any, name: str) -> Any:
-    """读取 SDK object 或 mapping 字段。"""
+    """Read a field from an SDK object or mapping."""
     if isinstance(container, Mapping):
         return container.get(name)
     return getattr(container, name, None)
 
 
 def _is_network_error(exc: BaseException) -> bool:
-    """识别不会暴露 provider 响应内容的网络异常。"""
+    """Identify network exceptions without exposing provider response content."""
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
     module = type(exc).__module__.split(".", 1)[0]

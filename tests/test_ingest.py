@@ -1,4 +1,4 @@
-"""显式建库、预算、checkpoint 恢复与原子发布测试。"""
+"""Explicit index-build, budget, checkpoint-resume, and atomic-publication tests."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ DIMENSION = 1024
 
 
 class FakeUsageEncoder:
-    """返回固定维度向量和可控 usage 的离线 provider。"""
+    """Return fixed-dimension vectors and controlled usage without network access."""
 
     def __init__(self, *, fail_on_call=None, tokens_per_batch=3):
         self.fail_on_call = fail_on_call
@@ -37,7 +37,7 @@ class FakeUsageEncoder:
         return EmbeddingBatch(tuple(vectors), self.tokens_per_batch)
 
     def encode_query(self, _text):
-        raise AssertionError("建库不应调用 query embedding")
+        raise AssertionError("index builds must not call query embedding")
 
     def encode_documents(self, texts, *, show_progress=False):
         return [list(vector) for vector in self.encode_documents_with_usage(
@@ -46,7 +46,7 @@ class FakeUsageEncoder:
 
 
 class ReservationUsageEncoder(FakeUsageEncoder):
-    """让离线 usage 精确等于建库调用前的保守预留。"""
+    """Make offline usage exactly match the conservative pre-call reservation."""
 
     def encode_documents_with_usage(self, texts, *, show_progress=False):
         self.tokens_per_batch = sum(_estimate_tokens(text) for text in texts)

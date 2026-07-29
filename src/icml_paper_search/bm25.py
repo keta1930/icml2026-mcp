@@ -1,4 +1,4 @@
-"""SQLite FTS5 BM25 sidecar 的构建与只读查询。"""
+"""Build and query the read-only SQLite FTS5 BM25 sidecar."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _WORD_RE = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
 
 @dataclass(frozen=True, slots=True)
 class RankedPaperId:
-    """单路检索返回的论文 id、名次和原始分数。"""
+    """Paper ID, rank, and raw score returned by one retrieval channel."""
 
     paper_id: str
     rank: int
@@ -27,7 +27,7 @@ class RankedPaperId:
 
 
 class BM25IndexBuilder:
-    """增量、幂等地构建一个 FTS5 索引文件。"""
+    """Build an FTS5 index file incrementally and idempotently."""
 
     def __init__(self, path: Path, *, resume: bool = False) -> None:
         self.path = Path(path)
@@ -56,7 +56,7 @@ class BM25IndexBuilder:
         self._connection.commit()
 
     def add_records(self, records: Sequence[PaperRecord]) -> None:
-        """以 paper id 幂等写入一批完整记录。"""
+        """Write a batch of complete records idempotently by paper ID."""
         with self._connection:
             for record in records:
                 fields = record.fields
@@ -80,7 +80,7 @@ class BM25IndexBuilder:
                 )
 
     def finalize(self, *, corpus_hash: str) -> None:
-        """写入版本元数据并压缩 FTS 索引。"""
+        """Write version metadata and compact the FTS index."""
         with self._connection:
             values = {
                 "corpus_hash": corpus_hash,
@@ -97,12 +97,12 @@ class BM25IndexBuilder:
         self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def count(self) -> int:
-        """返回当前 FTS 文档数。"""
+        """Return the current FTS document count."""
         row = self._connection.execute("SELECT count(*) FROM papers_fts").fetchone()
         return int(row[0]) if row else 0
 
     def close(self) -> None:
-        """关闭构建连接。"""
+        """Close the build connection."""
         self._connection.close()
 
     def __enter__(self) -> BM25IndexBuilder:
@@ -113,7 +113,7 @@ class BM25IndexBuilder:
 
 
 class BM25Index:
-    """可从多个工作线程安全读取的 FTS5 索引。"""
+    """FTS5 index that can be read safely from multiple worker threads."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -131,7 +131,7 @@ class BM25Index:
     def search(
         self, query: str, *, limit: int, filters: SearchFilters
     ) -> list[RankedPaperId]:
-        """在过滤后的候选域执行一次固定 LIMIT 的 BM25 排名。"""
+        """Run one fixed-LIMIT BM25 ranking over the filtered candidate domain."""
         if limit <= 0:
             return []
         expression = _fts_query(query)
@@ -166,12 +166,12 @@ class BM25Index:
         ]
 
     def count(self) -> int:
-        """返回只读索引内的论文数。"""
+        """Return the paper count in the read-only index."""
         row = self._connection().execute("SELECT count(*) FROM papers_fts").fetchone()
         return int(row[0]) if row else 0
 
     def corpus_hash(self) -> str:
-        """返回构建时写入的语料哈希。"""
+        """Return the corpus hash written during the build."""
         row = self._connection().execute(
             "SELECT value FROM index_meta WHERE key = 'corpus_hash'"
         ).fetchone()
@@ -180,7 +180,7 @@ class BM25Index:
         return str(row[0])
 
     def close(self) -> None:
-        """关闭本实例创建的全部线程连接。"""
+        """Close every thread-local connection created by this instance."""
         with self._connections_lock:
             connections, self._connections = self._connections, set()
         for connection in connections:
@@ -188,7 +188,7 @@ class BM25Index:
         self._local.connection = None
 
     def _connection(self) -> sqlite3.Connection:
-        """为当前线程延迟打开 immutable 只读连接。"""
+        """Lazily open an immutable read-only connection for the current thread."""
         connection = getattr(self._local, "connection", None)
         if connection is None:
             uri = f"file:{self.path.resolve().as_posix()}?mode=ro&immutable=1"
@@ -201,6 +201,6 @@ class BM25Index:
 
 
 def _fts_query(query: str) -> str:
-    """把自然语言转换为不会注入 FTS 操作符的 OR 查询。"""
+    """Convert natural language into an OR query that cannot inject FTS operators."""
     terms = _WORD_RE.findall(query)
     return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)

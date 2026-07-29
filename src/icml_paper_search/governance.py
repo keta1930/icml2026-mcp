@@ -1,4 +1,4 @@
-"""公共 MCP 的持久限流、预算、缓存与有界并发控制。"""
+"""Persistent rate limits, budgets, caching, and bounded concurrency for public MCP."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _period_keys(timestamp: float) -> tuple[str, str]:
 
 
 class SQLiteRateLimiter:
-    """用 SQLite token bucket 与 UTC 日计数实施原子限流。"""
+    """Enforce atomic rate limits with SQLite token buckets and UTC daily counts."""
 
     def __init__(self, database: RuntimeDatabase, settings: Settings | None = None) -> None:
         self._database = database
@@ -57,13 +57,13 @@ class SQLiteRateLimiter:
         self._identity_salt = self._load_identity_salt()
 
     def hash_identity(self, identity: str) -> str:
-        """用数据库持久 salt 摘要来源身份，使重启后限流连续。"""
+        """Hash source identities with the persistent database salt across restarts."""
         return hash_client_identity(identity, self._identity_salt)
 
     def check_search(
         self, client_hash: str, now: datetime | float | None = None
     ) -> None:
-        """通过时原子扣减 IP/global token 并增加 IP 日计数。"""
+        """Atomically consume IP/global tokens and increment the IP daily count."""
         self._check(
             client_hash,
             scope="search-ip",
@@ -77,7 +77,7 @@ class SQLiteRateLimiter:
     def check_session_open(
         self, client_hash: str, now: datetime | float | None = None
     ) -> None:
-        """在创建 session 前扣减持久化的来源 IP 额度。"""
+        """Consume the persistent source-IP allowance before creating a session."""
         self._check(
             client_hash,
             scope="session-open-ip",
@@ -99,7 +99,7 @@ class SQLiteRateLimiter:
         global_rate_per_minute: int | None,
         now: datetime | float | None,
     ) -> None:
-        """在单个事务中检查并扣减一类请求的所有额度。"""
+        """Check and consume every allowance for one request class in one transaction."""
         timestamp = _timestamp(now)
         utc_day, _ = _period_keys(timestamp)
         with self._database.transaction() as connection:
@@ -197,7 +197,7 @@ class SQLiteRateLimiter:
 
 @dataclass(frozen=True, slots=True)
 class BudgetReservation:
-    """表示已在日/月额度中占位的 provider 调用。"""
+    """Represent a provider call reserved against daily and monthly allowances."""
 
     reservation_id: str
     reserved_tokens: int
@@ -205,7 +205,7 @@ class BudgetReservation:
 
 @dataclass(frozen=True, slots=True)
 class BudgetStatus:
-    """返回当前 scope 的在线预算快照。"""
+    """Return an online-budget snapshot for the current scope."""
 
     daily_consumed: int
     daily_reserved: int
@@ -218,7 +218,7 @@ class BudgetStatus:
 
 
 class SQLiteBudgetLedger:
-    """在 provider 调用前预留并在响应后保守对账 Token。"""
+    """Reserve tokens before provider calls and reconcile them conservatively."""
 
     def __init__(self, database: RuntimeDatabase, settings: Settings | None = None) -> None:
         self._database = database
@@ -232,9 +232,9 @@ class SQLiteBudgetLedger:
         scope: str = "online",
         now: datetime | float | None = None,
     ) -> BudgetReservation:
-        """同时满足日/月硬上限时创建原子预算预留。"""
+        """Create an atomic reservation when both daily and monthly caps permit it."""
         if tokens < 1:
-            raise ValueError("预留 Token 必须为正整数")
+            raise ValueError("reserved tokens must be a positive integer")
         timestamp = _timestamp(now)
         utc_day, utc_month = _period_keys(timestamp)
         reservation_id = f"res_{secrets.token_urlsafe(18)}"
@@ -271,7 +271,7 @@ class SQLiteBudgetLedger:
         request_sent: bool = True,
         now: datetime | float | None = None,
     ) -> int:
-        """按实际 usage 对账；usage 未知且已发送时按预留计费。"""
+        """Reconcile actual usage, charging the reservation when sent usage is unknown."""
         timestamp = _timestamp(now)
         reservation_id = (
             reservation.reservation_id
@@ -284,12 +284,12 @@ class SQLiteBudgetLedger:
                 (reservation_id,),
             ).fetchone()
             if row is None or row["status"] != "reserved":
-                raise ValueError("预算预留不存在或已结算")
+                raise ValueError("the budget reservation does not exist or is already settled")
             charged = row["reserved_tokens"] if request_sent and actual_tokens is None else 0
             actual: int | None = None
             if actual_tokens is not None:
                 if actual_tokens < 0:
-                    raise ValueError("实际 Token 不能为负数")
+                    raise ValueError("actual tokens must not be negative")
                 actual = int(actual_tokens)
                 charged = actual
             overrun = max(0, charged - row["reserved_tokens"]) if actual is not None else 0
@@ -323,7 +323,7 @@ class SQLiteBudgetLedger:
     def status(
         self, *, scope: str = "online", now: datetime | float | None = None
     ) -> BudgetStatus:
-        """读取当前 UTC 日/月的已消费与已预留额度。"""
+        """Read consumed and reserved allowances for the current UTC day and month."""
         timestamp = _timestamp(now)
         utc_day, utc_month = _period_keys(timestamp)
         with self._database.transaction() as connection:
@@ -366,7 +366,7 @@ def embedding_cache_key(
     dimension: int,
     text_type: str = "query",
 ) -> str:
-    """生成不含原 query 的稳定 cache key。"""
+    """Generate a stable cache key that does not contain the raw query."""
     normalized = " ".join(query.split())
     material = "\0".join(
         (provider, region, model, str(dimension), text_type, hash_query(normalized))
@@ -375,12 +375,12 @@ def embedding_cache_key(
 
 
 def query_token_upper_bound(text: str) -> int:
-    """按 UTF-8 byte 数加固定协议开销预留 query Token。"""
+    """Reserve query tokens using UTF-8 bytes plus fixed protocol overhead."""
     return max(1, len(text.encode("utf-8")) + QUERY_TOKEN_PROTOCOL_OVERHEAD)
 
 
 class EmbeddingCache:
-    """只缓存成功 query vector，并按 TTL/LRU 有界回收。"""
+    """Cache only successful query vectors with bounded TTL/LRU eviction."""
 
     def __init__(self, database: RuntimeDatabase, settings: Settings | None = None) -> None:
         self._database = database
@@ -390,7 +390,7 @@ class EmbeddingCache:
     def get(
         self, cache_key: str, *, now: datetime | float | None = None
     ) -> list[float] | None:
-        """读取未过期向量并刷新 LRU 时间。"""
+        """Read an unexpired vector and refresh its LRU timestamp."""
         if self._settings.embedding_cache_max_entries == 0:
             return None
         timestamp = _timestamp(now)
@@ -435,7 +435,7 @@ class EmbeddingCache:
         token_count: int = 0,
         now: datetime | float | None = None,
     ) -> None:
-        """写入成功向量并在同一事务内清理 TTL/LRU。"""
+        """Write a successful vector and enforce TTL/LRU limits in one transaction."""
         max_entries = self._settings.embedding_cache_max_entries
         if max_entries == 0:
             return
@@ -443,7 +443,7 @@ class EmbeddingCache:
         if len(values) != self._settings.embedding_dim or not all(
             math.isfinite(value) for value in values
         ):
-            raise ValueError("缓存向量维度或数值无效")
+            raise ValueError("cached vector dimensions or values are invalid")
         timestamp = _timestamp(now)
         expires_at = timestamp + self._settings.embedding_cache_ttl_seconds
         payload = json.dumps(values, separators=(",", ":")).encode("utf-8")
@@ -483,7 +483,7 @@ class EmbeddingCache:
                 )
 
     def prune(self, *, now: datetime | float | None = None) -> int:
-        """显式清理过期 cache。"""
+        """Explicitly remove expired cache entries."""
         with self._database.transaction() as connection:
             cursor = connection.execute(
                 "DELETE FROM embedding_cache WHERE expires_at <= ?", (_timestamp(now),)
@@ -499,14 +499,14 @@ class _Flight(Generic[T]):
 
 
 class SingleFlight:
-    """合并进程内相同 cache miss，让等待线程共享同一结果。"""
+    """Coalesce identical in-process cache misses so waiters share one result."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._flights: dict[str, _Flight[Any]] = {}
 
     def run(self, key: str, operation: Callable[[], T]) -> T:
-        """由首个线程执行 operation，其余线程等待同一结果。"""
+        """Run the operation in the first thread while other threads await its result."""
         with self._lock:
             flight = self._flights.get(key)
             owner = flight is None
@@ -530,7 +530,7 @@ class SingleFlight:
 
 
 class UsageAwareEncoder(Protocol):
-    """描述治理包装器需要的同步 provider 接口。"""
+    """Describe the synchronous provider interface required by governance."""
 
     def encode_query_with_usage(self, text: str) -> Any: ...
 
@@ -542,7 +542,7 @@ class UsageAwareEncoder(Protocol):
 
 
 class GovernedQueryEncoder:
-    """串接 cache、single-flight、预算与 provider 并发控制。"""
+    """Compose caching, single-flight, budgets, and provider concurrency controls."""
 
     def __init__(
         self,
@@ -563,7 +563,7 @@ class GovernedQueryEncoder:
         )
 
     def encode_query(self, text: str) -> list[float]:
-        """优先命中持久 cache，否则合并请求后受预算约束地调用 provider。"""
+        """Use persistent cache first, then coalesce and budget provider calls."""
         key = embedding_cache_key(
             text,
             model=self._settings.embedding_model,
@@ -577,16 +577,16 @@ class GovernedQueryEncoder:
     def encode_documents(
         self, texts: Sequence[str], *, show_progress: bool = False
     ) -> list[list[float]]:
-        """建库由 CLI 独立预算约束，本包装器只限制 provider 并发。"""
+        """Limit provider concurrency while the CLI independently budgets index builds."""
         with self._provider_slots:
             return self._provider.encode_documents(texts, show_progress=show_progress)
 
     def close(self) -> None:
-        """关闭底层 provider 的线程资源。"""
+        """Close thread resources owned by the underlying provider."""
         self._provider.close()
 
     def _encode_cache_miss(self, key: str, text: str) -> list[float]:
-        # 等待 single-flight 时可能已有另一个刚完成的请求写入 cache。
+        # Another request may populate the cache while this caller waits on single-flight.
         cached = self._cache.get(key)
         if cached is not None:
             return cached
@@ -605,7 +605,7 @@ class GovernedQueryEncoder:
         total_tokens = getattr(batch, "total_tokens", None)
         if not vectors or len(vectors) != 1 or total_tokens is None:
             self._budget.settle(reservation, request_sent=True)
-            raise ValueError("provider usage 契约无效")
+            raise ValueError("the provider usage contract is invalid")
         vector = [float(value) for value in vectors[0]]
         self._budget.settle(reservation, int(total_tokens), request_sent=True)
         self._cache.put(key, vector, token_count=int(total_tokens))
@@ -613,16 +613,16 @@ class GovernedQueryEncoder:
 
 
 class AdmissionController:
-    """限制 active+waiting search 数量，并给等待设置硬超时。"""
+    """Bound active-plus-waiting searches and apply a hard queue timeout."""
 
     def __init__(
         self, queue_size: int, timeout_seconds: float, *, worker_size: int | None = None
     ) -> None:
         active_size = worker_size if worker_size is not None else queue_size
         if queue_size < 1 or active_size < 1 or timeout_seconds <= 0:
-            raise ValueError("queue_size、worker_size 与 timeout_seconds 必须为正数")
+            raise ValueError("queue_size, worker_size, and timeout_seconds must be positive")
         if active_size > queue_size:
-            raise ValueError("worker_size 不能大于 queue_size")
+            raise ValueError("worker_size must not exceed queue_size")
         self._capacity = queue_size
         self._workers = asyncio.Semaphore(active_size)
         self._timeout_seconds = timeout_seconds
@@ -631,17 +631,17 @@ class AdmissionController:
 
     @property
     def admitted_count(self) -> int:
-        """返回当前 active+waiting 请求数。"""
+        """Return the current active-plus-waiting request count."""
         return self._admitted
 
     @property
     def peak_admitted_count(self) -> int:
-        """返回进程内观测到的最大 admission 请求数。"""
+        """Return the maximum admitted request count observed by this process."""
         return self._peak_admitted
 
     async def run_search(self, operation: Callable[[], Awaitable[T]]) -> T:
-        """在 admission slot 中执行 async 搜索操作。"""
-        # FastMCP 使用单一 event loop；首个 await 前的计数与预留是原子的。
+        """Run an asynchronous search operation inside an admission slot."""
+        # FastMCP uses one event loop, so reservation is atomic before the first await.
         if self._admitted >= self._capacity:
             raise ServerBusy()
         self._admitted += 1
@@ -664,7 +664,7 @@ class AdmissionController:
 
 @dataclass(slots=True)
 class ThreadLimiters:
-    """隔离慢搜索与轻量状态操作使用的 worker token。"""
+    """Separate worker tokens for slow searches and lightweight state operations."""
 
     search: anyio.CapacityLimiter
     state: anyio.CapacityLimiter
@@ -672,7 +672,7 @@ class ThreadLimiters:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ThreadLimiters:
-        """按单进程容量构造相互独立的 AnyIO limiter。"""
+        """Construct independent AnyIO limiters for single-process capacity."""
         return cls(
             search=anyio.CapacityLimiter(max(settings.provider_concurrency, 4)),
             state=anyio.CapacityLimiter(16),

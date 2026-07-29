@@ -1,4 +1,4 @@
-"""把本地混合检索与 SQLite capability session 编排成业务能力。"""
+"""Orchestrate local hybrid retrieval and SQLite capability sessions."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class PaperSearchService:
-    """保留 fixed-window 语义，并用原子 session 提交消除竞态。"""
+    """Preserve fixed-window semantics and eliminate races with atomic session commits."""
 
     def __init__(
         self,
@@ -59,7 +59,7 @@ class PaperSearchService:
     def open_session(
         self, label: str = "", default_top_k: int | None = None
     ) -> SessionSummary:
-        """创建一个后续按 capability 自动去重的检索会话。"""
+        """Create a search session with capability-based automatic deduplication."""
         top_k = (
             self._clamp_top_k(default_top_k)
             if default_top_k is not None
@@ -68,13 +68,13 @@ class PaperSearchService:
         return self._sessions.open(label=label, default_top_k=top_k)
 
     def close_session(self, session_id: str) -> SessionSummary:
-        """原子关闭会话并返回有界汇总。"""
+        """Atomically close a session and return a bounded summary."""
         return self._sessions.close(session_id, include_papers=True)
 
     def session_status(
         self, session_id: str, *, include_papers: bool = False
     ) -> SessionSummary:
-        """只按调用方持有的 capability 查看单个 session。"""
+        """Inspect one session only through a caller-held capability."""
         return self._sessions.status(
             session_id, include_papers=include_papers, include_queries=True
         )
@@ -89,19 +89,19 @@ class PaperSearchService:
         filters: SearchFilters | None = None,
         min_score: float | None = None,
     ) -> SearchOutcome:
-        """执行一次固定深度检索，并在 session 内原子提交实际返回项。"""
+        """Run one fixed-depth search and atomically commit returned items to the session."""
         normalized_query = " ".join(query.split())
         if not normalized_query:
-            raise InvalidRequestError(public_message="query 不能为空。")
+            raise InvalidRequestError(public_message="query must not be empty.")
         if len(normalized_query) > self._settings.max_query_chars:
-            raise InvalidRequestError(public_message="query 超过长度上限。")
+            raise InvalidRequestError(public_message="query exceeds the maximum length.")
         if min_score is not None and not 0.0 <= float(min_score) <= 1.0:
-            raise InvalidRequestError(public_message="min_score 必须在 [0,1] 内。")
+            raise InvalidRequestError(public_message="min_score must be within [0,1].")
 
         filters = filters or SearchFilters()
         session = None
         if session_id is not None:
-            # 远端 IO 前先做 capability/TTL 检查，但最终正确性由 commit_round 决定。
+            # Check capability and TTL before remote I/O; commit_round ensures final correctness.
             session = self._sessions.status(
                 session_id, include_papers=False, include_queries=False
             )
@@ -171,9 +171,9 @@ class PaperSearchService:
     def get_papers(
         self, paper_ids: list[str], *, session_id: str | None = None
     ) -> list[Paper]:
-        """按输入顺序精确取回论文，并原子登记实际存在的结果。"""
+        """Fetch papers in input order and atomically record those that exist."""
         if len(paper_ids) > self._settings.max_get_paper_ids:
-            raise InvalidRequestError(public_message="paper_ids 超过数量上限。")
+            raise InvalidRequestError(public_message="paper_ids exceeds the maximum item count.")
         papers = self._engine.fetch(paper_ids)
         if session_id is not None:
             self._sessions.mark_ids_seen(
@@ -182,14 +182,14 @@ class PaperSearchService:
         return papers
 
     def validate(self):
-        """执行不访问 provider 的本地索引 readiness 检查。"""
+        """Run local index readiness checks without provider access."""
         validate = getattr(self._engine, "validate", None)
         if not callable(validate):
             return None
         return validate()
 
     def close(self) -> None:
-        """关闭引擎及由本服务创建的 runtime database。"""
+        """Close the engine and the runtime database created by this service."""
         close_engine = getattr(self._engine, "close", None)
         if callable(close_engine):
             close_engine()
@@ -203,7 +203,7 @@ class PaperSearchService:
         return max(1, min(int(top_k), settings.max_top_k))
 
     def _resolve_depth(self, wanted: int, search_depth: int | None) -> int:
-        """显式 depth 优先，始终夹在 wanted 与全局上限之间。"""
+        """Prefer explicit depth while clamping it between wanted and the global limit."""
         settings = self._settings
         depth = (
             search_depth

@@ -1,4 +1,4 @@
-"""本地语料元数据：入库记录组装与 area/type 分布统计。"""
+"""Local corpus record assembly and area/type distribution tests."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import pytest
 
 from icml_paper_search.catalog import (
+    Catalog,
     corpus_hash,
     data_file_hashes,
     get_catalog,
@@ -56,7 +57,7 @@ def test_load_records_joins_abstracts(data_dir):
     assert [r.paper_id for r in records] == ["a1", "a2", "a3"]
     assert records[0].text == "First\nAbstract one."
     assert records[0].fields["abstract"] == "Abstract one."
-    # 缺摘要的论文仍入库，text 退化为 title
+    # Papers without abstracts remain indexable using title-only text.
     assert records[2].fields["abstract"] == ""
     assert records[2].text == "Third"
 
@@ -66,7 +67,7 @@ def test_load_records_serializes_authors_and_defaults(data_dir):
 
     assert json.loads(records[0].fields["authors"]) == ["Alice"]
     assert records[0].fields["spot"] is True
-    # 缺失的可选字段补空值，不是 None
+    # Missing optional fields use empty values rather than None.
     assert records[2].fields["area"] == ""
     assert records[2].fields["spot"] is False
 
@@ -81,7 +82,7 @@ def test_catalog_counts_areas_and_spotlights(data_dir):
 
 
 def test_catalog_accepts_settings_instance(data_dir):
-    """Settings 不可 hash，缓存必须按路径做键，否则这里会 TypeError。"""
+    """Cache by path because Settings is unhashable."""
     first = get_catalog(Settings(data_dir=data_dir))
     second = get_catalog(Settings(data_dir=data_dir))
     assert first is second
@@ -90,7 +91,20 @@ def test_catalog_accepts_settings_instance(data_dir):
 def test_catalog_render_lists_filter_values(data_dir):
     text = get_catalog(Settings(data_dir=data_dir)).render()
     assert "Theory  (2)" in text
-    assert "paper_type 可选值" in text
+    assert "Available paper_type values:" in text
+
+
+def test_catalog_render_preserves_taxonomy_values_verbatim():
+    text = Catalog(
+        total=2,
+        areas=(("机器学习", 2),),
+        paper_types=(("海报", 2),),
+        spotlights=1,
+    ).render()
+
+    assert "ICML 2026 corpus: 2 papers, including 1 spotlight papers." in text
+    assert "机器学习  (2)" in text
+    assert "海报  (2)" in text
 
 
 def test_missing_data_file_names_the_path(tmp_path):

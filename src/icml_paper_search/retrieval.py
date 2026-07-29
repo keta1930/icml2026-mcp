@@ -1,4 +1,4 @@
-"""Chroma COSINE 与 SQLite BM25 的本地加权 RRF 检索。"""
+"""Local weighted-RRF retrieval over Chroma COSINE and SQLite BM25."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from .models import Paper, SearchFilters, SearchHit
 
 @runtime_checkable
 class SearchEngine(Protocol):
-    """业务编排层依赖的最小检索能力。"""
+    """Minimal retrieval capability required by business orchestration."""
 
     def search(
         self, query: str, *, limit: int, filters: SearchFilters
@@ -26,7 +26,7 @@ class SearchEngine(Protocol):
 
 
 class ChromaHybridSearchEngine:
-    """单进程打开当前版本并执行固定窗口双路召回。"""
+    """Open the current version in one process and run fixed-window dual retrieval."""
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class ChromaHybridSearchEngine:
 
     @property
     def manifest(self) -> IndexManifest:
-        """延迟打开并返回当前索引 manifest。"""
+        """Lazily open and return the current index manifest."""
         with self._chroma_limit:
             self._open_current()
             assert self._manifest is not None
@@ -55,10 +55,10 @@ class ChromaHybridSearchEngine:
     def search(
         self, query: str, *, limit: int, filters: SearchFilters
     ) -> list[SearchHit]:
-        """两路各召回一次后按 weighted RRF 返回固定窗口。"""
+        """Run each channel once and return a fixed window using weighted RRF."""
         if limit <= 0:
             return []
-        # provider 不占 Chroma semaphore，二者可按各自容量独立背压。
+        # Provider and Chroma semaphores apply independent backpressure.
         vector = self._encoder.encode_query(query)
         with self._chroma_limit:
             self._open_current()
@@ -86,7 +86,7 @@ class ChromaHybridSearchEngine:
         ]
 
     def fetch(self, paper_ids: Sequence[str]) -> list[Paper]:
-        """按输入顺序取回论文，去重并跳过未知 id。"""
+        """Fetch papers in input order, deduplicating and skipping unknown IDs."""
         ids = [paper_id for paper_id in dict.fromkeys(paper_ids) if paper_id]
         if not ids:
             return []
@@ -95,14 +95,14 @@ class ChromaHybridSearchEngine:
             return self._fetch_locked(ids)
 
     def count(self) -> int:
-        """返回当前 Chroma collection 论文数。"""
+        """Return the paper count in the current Chroma collection."""
         with self._chroma_limit:
             self._open_current()
             assert self._collection is not None
             return int(self._collection.count())
 
     def validate(self) -> IndexManifest:
-        """零云调用重新核对当前版本的双索引一致性。"""
+        """Revalidate dual-index consistency without cloud calls."""
         with self._chroma_limit:
             version = resolve_current(self._settings.index_root)
             manifest = validate_index_version(version, settings=self._settings)
@@ -111,7 +111,7 @@ class ChromaHybridSearchEngine:
             return manifest
 
     def close(self) -> None:
-        """关闭 encoder 与 FTS 连接；Chroma client 由 SDK 管理。"""
+        """Close encoder and FTS connections; the SDK manages the Chroma client."""
         with self._chroma_limit:
             if self._bm25 is not None:
                 self._bm25.close()
@@ -125,7 +125,7 @@ class ChromaHybridSearchEngine:
             close_encoder()
 
     def _open_current(self) -> None:
-        """首次使用时校验并打开 current，不在运行中热切版本。"""
+        """Validate and open current on first use without hot-switching versions."""
         if self._collection is not None:
             return
         version = resolve_current(self._settings.index_root)
@@ -149,7 +149,7 @@ class ChromaHybridSearchEngine:
     def _dense_search(
         self, vector: list[float], *, limit: int, filters: SearchFilters
     ) -> list[RankedPaperId]:
-        """执行一次 Chroma COSINE fixed-limit 查询。"""
+        """Run one fixed-limit Chroma COSINE query."""
         assert self._collection is not None
         assert self._manifest is not None
         n_results = min(limit, self._manifest.record_count)
@@ -178,7 +178,7 @@ class ChromaHybridSearchEngine:
         ]
 
     def _fetch_locked(self, paper_ids: Sequence[str]) -> list[Paper]:
-        """在已持有 Chroma semaphore 时批量取回 metadata。"""
+        """Fetch metadata in bulk while holding the Chroma semaphore."""
         assert self._collection is not None
         ids = [paper_id for paper_id in dict.fromkeys(paper_ids) if paper_id]
         if not ids:
@@ -210,7 +210,7 @@ class ChromaHybridSearchEngine:
 
 
 def _to_chroma_where(filters: SearchFilters) -> dict[str, Any] | None:
-    """把领域过滤条件转换为 Chroma 结构化 where。"""
+    """Convert domain filters into a structured Chroma where clause."""
     clauses: list[dict[str, Any]] = []
     if filters.area:
         clauses.append({"area": {"$eq": filters.area}})
@@ -234,7 +234,7 @@ def _weighted_rrf(
     rrf_k: int,
     limit: int,
 ) -> list[tuple[str, float]]:
-    """按理论最大值归一化 weighted RRF 并稳定排序。"""
+    """Normalize weighted RRF by its theoretical maximum and sort stably."""
     dense_ranks = {item.paper_id: item.rank for item in dense}
     bm25_ranks = {item.paper_id: item.rank for item in bm25}
     paper_ids = dense_ranks.keys() | bm25_ranks.keys()
@@ -258,7 +258,7 @@ def _weighted_rrf(
 
 
 def _paper_from_mapping(mapping: Mapping[str, Any]) -> Paper:
-    """适配领域模型迁移期间的新旧构造方法。"""
+    """Adapt old and new constructors during the domain-model migration."""
     constructor = getattr(Paper, "from_mapping", None)
     if constructor is not None:
         return constructor(mapping)
@@ -266,7 +266,7 @@ def _paper_from_mapping(mapping: Mapping[str, Any]) -> Paper:
 
 
 def _abstract_from_document(document: Any) -> str:
-    """仅在 metadata 缺摘要时从 title+abstract 文档回退。"""
+    """Fall back to the title-plus-abstract document only when metadata lacks an abstract."""
     if not isinstance(document, str):
         return ""
     _title, separator, abstract = document.partition("\n")

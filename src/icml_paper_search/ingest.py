@@ -1,4 +1,4 @@
-"""显式、可恢复地构建 Chroma + FTS5 版本化索引。"""
+"""Explicitly build a resumable, versioned Chroma and FTS5 index."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ _BUILD_FAILURE_AUDIT = "failure-audit.json"
 
 @dataclass(frozen=True, slots=True)
 class BuildPlan:
-    """不读取 key、不访问网络的建库预检结果。"""
+    """Index-build preflight result that reads no key and accesses no network."""
 
     build_id: str
     record_count: int
@@ -49,7 +49,7 @@ class BuildPlan:
 
 @dataclass(frozen=True, slots=True)
 class BuildCheckpoint:
-    """仅在完整批次提交后前移的恢复点。"""
+    """Recovery point advanced only after a complete batch is committed."""
 
     build_id: str
     corpus_hash: str
@@ -62,7 +62,7 @@ class BuildCheckpoint:
 
 @dataclass(frozen=True, slots=True)
 class BuildResult:
-    """建库命令的预检或执行结果。"""
+    """Preflight or execution result for an index-build command."""
 
     plan: BuildPlan
     executed: bool
@@ -72,7 +72,7 @@ class BuildResult:
 
 
 def plan_build(settings: Settings | None = None) -> BuildPlan:
-    """只读取本地语料并给出稳定 build id 与费用上界估算。"""
+    """Read only local corpus data and estimate a stable build ID and cost upper bound."""
     cfg = settings or get_settings()
     records = load_records(cfg)
     digest = corpus_hash(records)
@@ -95,7 +95,7 @@ def build_index(
     execute: bool = False,
     resume: bool = False,
 ) -> BuildResult:
-    """在 staging 构建并完整校验后原子发布 current。"""
+    """Build in staging and atomically publish current after complete validation."""
     cfg = settings or get_settings()
     plan = plan_build(cfg)
     if not execute:
@@ -107,7 +107,7 @@ def build_index(
             version_path=None,
         )
     if max_input_tokens is None or max_input_tokens <= 0:
-        raise ValueError("执行建库必须设置正数 max_input_tokens")
+        raise ValueError("executing an index build requires a positive max_input_tokens value")
 
     records = load_records(cfg)
     paths = IndexPaths.for_root(cfg.index_root)
@@ -149,7 +149,7 @@ def build_index(
     )
     failure_audit_path = staging / _BUILD_FAILURE_AUDIT
     if resume and failure_audit_path.exists():
-        # provider usage 违反预留契约后不能继续自动花费；需删除 staging 重建。
+        # Stop automatic spending after provider usage violates the reservation contract.
         raise IndexUnavailable()
     try:
         import chromadb
@@ -242,7 +242,7 @@ def build_index(
 def _encode_documents_with_usage(
     encoder: TextEncoder, records: list[PaperRecord]
 ) -> EmbeddingBatch:
-    """优先使用 usage-aware 接口，测试替身则保守估算。"""
+    """Prefer the usage-aware interface and conservatively estimate test doubles."""
     texts = [record.text for record in records]
     method = getattr(encoder, "encode_documents_with_usage", None)
     if callable(method):
@@ -257,7 +257,7 @@ def _encode_documents_with_usage(
 def _upsert_chroma(
     collection: Any, records: list[PaperRecord], encoded: EmbeddingBatch
 ) -> None:
-    """显式传入 embedding，禁止 Chroma 调用隐式模型。"""
+    """Pass embeddings explicitly so Chroma cannot invoke an implicit model."""
     collection.upsert(
         ids=[record.paper_id for record in records],
         embeddings=[list(vector) for vector in encoded.vectors],
@@ -273,7 +273,7 @@ def _verify_staging(
     manifest: IndexManifest,
     settings: Settings,
 ) -> None:
-    """校验 count、维度、fetch、过滤和两路基本查询。"""
+    """Validate counts, dimensions, fetch, filtering, and basic dual-channel queries."""
     validate_index_version(
         staging,
         settings=settings,
@@ -325,7 +325,7 @@ def _verify_staging(
 def _validate_vectors(
     encoded: EmbeddingBatch, *, expected_count: int, dimension: int
 ) -> None:
-    """在写盘前验证批次数量与维度。"""
+    """Validate batch count and dimensions before writing to disk."""
     if len(encoded.vectors) != expected_count or encoded.total_tokens < 0:
         raise IndexUnavailable()
     if any(len(vector) != dimension for vector in encoded.vectors):
@@ -333,7 +333,7 @@ def _validate_vectors(
 
 
 def _new_checkpoint(plan: BuildPlan, settings: Settings) -> BuildCheckpoint:
-    """创建空恢复点。"""
+    """Create an empty recovery point."""
     return BuildCheckpoint(
         build_id=plan.build_id,
         corpus_hash=plan.corpus_hash,
@@ -348,7 +348,7 @@ def _new_checkpoint(plan: BuildPlan, settings: Settings) -> BuildCheckpoint:
 def _load_checkpoint(
     path: Path, *, plan: BuildPlan, settings: Settings
 ) -> BuildCheckpoint:
-    """读取并核对 staging 恢复点。"""
+    """Read and validate a staging recovery point."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["completed_ids"] = tuple(payload["completed_ids"])
@@ -369,7 +369,7 @@ def _load_checkpoint(
 
 
 def _save_checkpoint(path: Path, checkpoint: BuildCheckpoint) -> None:
-    """批次提交后原子前移 checkpoint。"""
+    """Atomically advance the checkpoint after committing a batch."""
     temporary = path.with_name(".checkpoint.json.tmp")
     payload = json.dumps(asdict(checkpoint), ensure_ascii=False, sort_keys=True) + "\n"
     with temporary.open("w", encoding="utf-8") as fh:
@@ -385,9 +385,9 @@ def _save_checkpoint(path: Path, checkpoint: BuildCheckpoint) -> None:
 
 
 def _estimate_tokens(text: str) -> int:
-    """按 UTF-8 bytes 与固定输入开销给出 provider Token 上界。"""
-    # qwen embedding 的 input usage 以 tokenizer token 计；每个普通 token 至少
-    # 消耗一个 UTF-8 byte，额外协议 token 由每条 32-token 余量覆盖。
+    """Bound provider tokens using UTF-8 bytes and fixed per-input overhead."""
+    # Qwen embedding input usage counts tokenizer tokens; each ordinary token consumes
+    # at least one UTF-8 byte, while 32 tokens per input cover protocol overhead.
     return max(1, len(text.encode("utf-8"))) + _TOKEN_OVERHEAD_PER_INPUT
 
 
@@ -398,7 +398,7 @@ def _select_batch_within_budget(
     batch_size: int,
     remaining_tokens: int,
 ) -> tuple[list[PaperRecord], int]:
-    """按严格语料前缀缩小最后一批，确保调用前预留不越界。"""
+    """Shrink the final batch along a strict corpus prefix to stay within reservation."""
     batch: list[PaperRecord] = []
     reserved_tokens = 0
     for record in records[start : start + batch_size]:
@@ -421,7 +421,7 @@ def _save_failure_audit(
     total_tokens_before: int,
     hard_cap: int,
 ) -> None:
-    """记录 provider usage 违反预留契约的脱敏、不可恢复审计。"""
+    """Record a sanitized, non-resumable audit for provider reservation violations."""
     payload = {
         "reason": "provider_usage_exceeded_reservation",
         "build_id": plan.build_id,

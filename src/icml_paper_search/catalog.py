@@ -1,4 +1,4 @@
-"""本地语料元数据：读 index.json / abstracts.json，供入库与过滤取值提示使用。"""
+"""Load local corpus metadata for indexing and filter-value guidance."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from .config import Settings, get_settings
 
 @dataclass(frozen=True, slots=True)
 class PaperRecord:
-    """Chroma 与 FTS5 共享的一条规范化论文记录。"""
+    """Normalized paper record shared by Chroma and FTS5."""
 
     fields: dict[str, Any]
     text: str
@@ -27,7 +27,7 @@ class PaperRecord:
 
 
 def load_records(settings: Settings | None = None) -> list[PaperRecord]:
-    """组装全量入库记录：index.json 的元数据 + abstracts.json 的摘要。"""
+    """Assemble all index records from metadata and abstract snapshots."""
     cfg = settings or get_settings()
     index = _read_json(cfg.index_path)
     abstracts = _read_json(cfg.abstracts_path)
@@ -59,7 +59,7 @@ def load_records(settings: Settings | None = None) -> list[PaperRecord]:
 
 
 def corpus_hash(records: list[PaperRecord]) -> str:
-    """计算与输入顺序无关的规范语料 SHA-256。"""
+    """Compute the canonical order-independent corpus SHA-256."""
     digest = hashlib.sha256()
     for record in sorted(records, key=lambda item: item.paper_id):
         payload = {"fields": record.fields, "text": record.text}
@@ -75,7 +75,7 @@ def corpus_hash(records: list[PaperRecord]) -> str:
 
 
 def paper_ids_hash(paper_ids: Iterable[str]) -> str:
-    """计算排序后论文 id 集合的稳定 SHA-256。"""
+    """Compute a stable SHA-256 over the sorted paper ID set."""
     digest = hashlib.sha256()
     for paper_id in sorted(paper_ids):
         encoded = paper_id.encode("utf-8")
@@ -85,7 +85,7 @@ def paper_ids_hash(paper_ids: Iterable[str]) -> str:
 
 
 def data_file_hashes(settings: Settings | None = None) -> dict[str, str]:
-    """返回构成语料的原始数据文件 SHA-256。"""
+    """Return SHA-256 hashes for the source files that form the corpus."""
     cfg = settings or get_settings()
     return {
         "index.json": _file_hash(cfg.index_path),
@@ -95,7 +95,7 @@ def data_file_hashes(settings: Settings | None = None) -> dict[str, str]:
 
 @dataclass(frozen=True, slots=True)
 class Catalog:
-    """语料的可过滤维度取值与分布。"""
+    """Filterable dimension values and distributions for the corpus."""
 
     total: int
     areas: tuple[tuple[str, int], ...]
@@ -103,24 +103,27 @@ class Catalog:
     spotlights: int
 
     def render(self) -> str:
-        """渲染成 filter 取值提示。"""
-        lines = [f"ICML 2026 语料共 {self.total} 篇，其中 spotlight {self.spotlights} 篇。"]
+        """Render filter-value guidance."""
+        lines = [
+            f"ICML 2026 corpus: {self.total} papers, including "
+            f"{self.spotlights} spotlight papers."
+        ]
         lines.append("")
-        lines.append("area 可选值（用于 search_papers 的 area 参数）：")
+        lines.append("Available area values (for the search_papers area parameter):")
         lines.extend(f"  {name}  ({count})" for name, count in self.areas)
         lines.append("")
-        lines.append("paper_type 可选值：")
+        lines.append("Available paper_type values:")
         lines.extend(f"  {name}  ({count})" for name, count in self.paper_types)
         return "\n".join(lines)
 
 
 def get_catalog(settings: Settings | None = None) -> Catalog:
-    """统计 area / type 分布；按数据文件路径缓存，语料是静态的。"""
+    """Count area and type values, caching by path because the corpus is static."""
     cfg = settings or get_settings()
     return _build_catalog(cfg.index_path)
 
 
-# 缓存键用路径而非 Settings：pydantic 的 Settings 不可 hash，直接喂给 lru_cache 会炸。
+# Cache by path because Pydantic Settings objects are not hashable.
 @lru_cache(maxsize=4)
 def _build_catalog(index_path: Path) -> Catalog:
     index = _read_json(index_path)
@@ -138,17 +141,17 @@ def _build_catalog(index_path: Path) -> Catalog:
 def _read_json(path: Path) -> Any:
     if not path.exists():
         raise FileNotFoundError(
-            f"缺少数据文件 {path}；请确认 ICML_PAPERS_DATA_DIR 指向包含 "
-            "index.json 与 abstracts.json 的目录"
+            f"Data file {path} is missing; ensure ICML_PAPERS_DATA_DIR points to a "
+            "directory containing index.json and abstracts.json"
         )
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
 
 
 def _file_hash(path: Path) -> str:
-    """流式计算单个数据文件 SHA-256。"""
+    """Compute a data file's SHA-256 incrementally."""
     if not path.exists():
-        raise FileNotFoundError(f"缺少数据文件 {path}")
+        raise FileNotFoundError(f"Data file {path} is missing")
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):

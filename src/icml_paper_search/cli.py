@@ -1,4 +1,4 @@
-"""开源版 CLI：零云预检、显式建库、检索与本地状态信息。"""
+"""Open-source CLI for offline preflight, explicit builds, search, and local status."""
 
 from __future__ import annotations
 
@@ -17,38 +17,42 @@ from .service import PaperSearchService
 
 
 def main(argv: list[str] | None = None) -> int:
-    """解析命令并返回稳定进程退出码。"""
+    """Parse a command and return a stable process exit code."""
     parser = argparse.ArgumentParser(
-        prog="icml-papers", description="ICML 2026 本地混合索引与检索"
+        prog="icml-papers", description="Local hybrid indexing and search for ICML 2026"
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    build = subcommands.add_parser("build", help="预检或显式构建版本化本地索引")
+    build = subcommands.add_parser(
+        "build", help="Preflight or explicitly build a versioned local index"
+    )
     build.add_argument(
         "--execute",
         action="store_true",
-        help="确认发起 DashScope 付费调用并构建索引；默认仅预检",
+        help="Confirm paid DashScope calls and build the index; the default is preflight only",
     )
     build.add_argument(
         "--max-input-tokens",
         type=int,
         default=None,
-        help="本次建库 Token 硬上限；--execute 时必填",
+        help="Hard input-token cap for this build; required with --execute",
     )
     build.add_argument(
-        "--resume", action="store_true", help="从匹配的完整批次 checkpoint 恢复"
+        "--resume", action="store_true", help="Resume from a matching complete-batch checkpoint"
     )
 
-    search = subcommands.add_parser("search", help="混合检索（留空进入交互模式）")
-    search.add_argument("query", nargs="*", help="检索语句")
-    search.add_argument("-k", "--top-k", type=int, default=None, help="返回条数")
-    search.add_argument("-d", "--depth", type=int, default=None, help="固定窗口深度")
-    search.add_argument("--area", default=None, help="按领域过滤")
-    search.add_argument("--type", dest="paper_type", default=None, help="按类型过滤")
-    search.add_argument("--spotlight", action="store_true", help="只要 spotlight")
-    search.add_argument("--session", action="store_true", help="交互模式启用 session 去重")
+    search = subcommands.add_parser("search", help="Hybrid search (omit query for interactive mode)")
+    search.add_argument("query", nargs="*", help="Search query")
+    search.add_argument("-k", "--top-k", type=int, default=None, help="Number of results")
+    search.add_argument("-d", "--depth", type=int, default=None, help="Fixed window depth")
+    search.add_argument("--area", default=None, help="Filter by research area")
+    search.add_argument("--type", dest="paper_type", default=None, help="Filter by paper type")
+    search.add_argument("--spotlight", action="store_true", help="Return spotlight papers only")
+    search.add_argument(
+        "--session", action="store_true", help="Enable session deduplication in interactive mode"
+    )
 
-    subcommands.add_parser("info", help="查看本地索引、模型与语料信息")
+    subcommands.add_parser("info", help="Show local index, model, and corpus information")
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
@@ -68,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_build(args: argparse.Namespace) -> int:
-    """先展示预检，再仅在显式确认与 hard cap 下执行。"""
+    """Show preflight first, then execute only with confirmation and a hard cap."""
     settings = get_settings()
     plan = plan_build(settings)
     print(f"build_id              : {plan.build_id}")
@@ -76,10 +80,10 @@ def _run_build(args: argparse.Namespace) -> int:
     print(f"corpus_hash           : {plan.corpus_hash}")
     print(f"estimated_input_tokens: {plan.estimated_input_tokens}")
     if not args.execute:
-        print("mode                  : preflight（未调用 DashScope）")
+        print("mode                  : preflight (DashScope was not called)")
         return 0
     if args.max_input_tokens is None or args.max_input_tokens <= 0:
-        raise ValueError("--execute 必须同时提供正数 --max-input-tokens")
+        raise ValueError("--execute requires a positive --max-input-tokens value")
     result = build_index(
         settings,
         max_input_tokens=args.max_input_tokens,
@@ -93,7 +97,7 @@ def _run_build(args: argparse.Namespace) -> int:
 
 
 def _info() -> int:
-    """输出不包含 secret 值且不访问 provider 的运行信息。"""
+    """Print runtime information without secret values or provider access."""
     settings = get_settings()
     key_configured = bool(
         settings.dashscope_api_key is not None
@@ -120,7 +124,7 @@ def _info() -> int:
 
 
 def _search(args: argparse.Namespace) -> int:
-    """执行单次或交互检索，并始终关闭本地客户端。"""
+    """Run one-shot or interactive search and always close local clients."""
     settings = get_settings()
     service = PaperSearchService(settings)
     filters = SearchFilters(
@@ -145,8 +149,8 @@ def _search(args: argparse.Namespace) -> int:
         session_id = (
             service.open_session(label="cli").session_id if args.session else None
         )
-        hint = "（会话去重开启）" if session_id else ""
-        print(f"交互检索{hint}，空行或 Ctrl-D 退出")
+        hint = " (session deduplication enabled)" if session_id else ""
+        print(f"Interactive search{hint}; submit an empty line or press Ctrl-D to exit")
         while True:
             try:
                 query = input("\nquery> ").strip()
