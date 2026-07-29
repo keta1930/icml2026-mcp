@@ -1,0 +1,37 @@
+---
+title: 安全与隐私
+description: 保护 DashScope key、capability session、匿名来源身份和公开错误边界。
+---
+
+服务匿名不等于没有安全边界。它同时处理付费 provider secret、可访问 session 的 capability、外部 query 和持久化状态。
+
+## Secret
+
+- 自托管 key 只从环境 secret 或只读文件读取，文件优先。
+- 真实 key 不进入 Git、镜像、测试 fixture、日志、异常和命令参数。
+- 公共客户端从不需要服务端 key。
+- Key 一旦进入聊天、历史、日志或提交，应立即在 DashScope 控制台轮换。
+
+## Query 与数据
+
+DashScope 会接收论文建库文本和未命中缓存的搜索 query。不要处理密钥、个人信息、未公开研究或其他敏感内容。
+
+Runtime state 不保存原始 query 和 IP；它保存使用部署私有 salt 的来源摘要与规范化 query hash。Session 标签按原样保存，因此也必须保持非敏感。
+
+## Capability session
+
+`session_id` 是 bearer capability。服务端无法恢复 raw id，也不会提供全局枚举；调用方必须负责安全保存和及时关闭。
+
+## Transport
+
+- DNS rebinding 防护默认开启。
+- 公网部署使用精确 Host/Origin，不使用任意通配域。
+- 只有 peer 位于可信网段时才接受代理来源 header。
+- TLS 在受控 sidecar 终止，应用 backend 不直接暴露公网。
+- 未知异常和 provider 响应只映射为公开短码。
+
+## 容器
+
+参考镜像以非 root 应用用户运行，只读根文件系统，丢弃能力，并把 secret 复制到小型 tmpfs 后降权。Canonical index 对服务只读；state 单独读写。
+
+部署前根据实际主机、代理和 secret manager 做威胁建模，示例配置不能直接代表生产安全结论。

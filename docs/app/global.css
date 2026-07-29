@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+:root {
+  --brand-cyan: #22d3ee;
+  --brand-violet: #8b5cf6;
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 20% 0%, rgb(34 211 238 / 8%), transparent 30rem),
+    radial-gradient(circle at 80% 10%, rgb(139 92 246 / 8%), transparent 32rem);
+}
+
+.hero-grid {
+  background-image:
+    linear-gradient(rgb(148 163 184 / 8%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / 8%) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, black, transparent 92%);
+}
+
+.gradient-text {
+  background: linear-gradient(100deg, var(--brand-cyan), #67e8f9 35%, #a78bfa 80%);
+  background-clip: text;
+  color: transparent;
+}

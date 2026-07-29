@@ -1,0 +1,63 @@
+---
+title: Docker 部署
+description: 构建不可变镜像，显式生成索引，并以只读 canonical index 启动单进程服务。
+---
+
+生产参考由一个显式建库 job、单进程 MCP 应用和 Nginx TLS sidecar 组成。镜像包含程序与语料，不包含 key、构建索引或 runtime state。
+
+## 构建与 smoke
+
+```bash
+docker build --build-arg VCS_REF=<git-sha> \
+  -t icml-paper-search-mcp:<git-sha> .
+sh deploy/smoke-container.sh icml-paper-search-mcp:<git-sha>
+```
+
+Smoke 验证两个 console script、固定 venv shebang、非 root uid/gid、入口路径和 runtime secret 权限。
+
+## 准备宿主机
+
+创建互相独立的 canonical index、state 和只读 secret 文件。目录必须由部署管理员显式创建，Compose 不应静默创建错误路径。
+
+需要提供的环境变量：
+
+| 变量 | 用途 |
+|---|---|
+| `ICML_MCP_IMAGE` | 不可变 git-SHA 镜像标签 |
+| `ICML_PAPERS_INDEX_DIR` | canonical index bind mount |
+| `ICML_PAPERS_STATE_DIR` | runtime state bind mount |
+| `ICML_PAPERS_DASHSCOPE_SECRET_FILE` | 宿主机 secret 文件 |
+| `ICML_PAPERS_BUILD_MAX_INPUT_TOKENS` | 建库硬上限 |
+| `ICML_PAPERS_TRUSTED_PROXY_NETWORKS` | 实际 TLS sidecar backend 网段 |
+
+## 显式建库
+
+```bash
+docker compose -f deploy/compose.yaml \
+  --profile build run --rm build-index
+```
+
+`build-index` 直接写 canonical index；不要在应用已经打开同一目录时并行运行。
+
+## 启动服务
+
+```bash
+docker compose -f deploy/compose.yaml up -d icml-mcp icml-mcp-tls
+docker compose -f deploy/compose.yaml ps
+```
+
+应用只读挂载 canonical index。入口在 state 锁下验证 `current`，复制完整版本到唯一 generation，并原子发布为可写 `runtime-index`；应用与 readiness 只打开副本。
+
+## 上线前必须替换
+
+- `deploy/compose.yaml` 和 `deploy/nginx.conf` 中的示例域名。
+- TLS 证书目录与外部端口。
+- 精确 `allowed_hosts` 和 `allowed_origins`。
+- TLS sidecar 实际 backend CIDR，不使用宽泛默认范围。
+- 镜像 registry、备份路径和日志收集策略。
+
+Compose 网络由 Docker 动态分配，不要恢复固定 subnet。`trusted_proxy_networks` 表示应用信任边界，不负责分配网络。
+
+## 更新
+
+发布新镜像或索引前先完成 smoke/建库验证。重启服务会重建 runtime index 副本，state 中应预留旧 generation、新 generation 与 SQLite/WAL 的空间。

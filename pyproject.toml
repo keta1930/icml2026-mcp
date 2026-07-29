@@ -3,6 +3,7 @@ name = "icml-paper-search-mcp"
 version = "0.1.0"
 description = "MCP server for deduplicated hybrid search over the ICML 2026 paper corpus"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.0.0,<2",

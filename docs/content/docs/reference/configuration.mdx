@@ -1,0 +1,48 @@
+---
+title: 配置
+description: ICML_PAPERS_ 环境变量、默认值、组合约束和 secret 优先级。
+---
+
+运行时配置集中在 `Settings`，根目录 `.env` 自动覆盖默认值，所有环境变量使用 `ICML_PAPERS_` 前缀。
+
+## Secret
+
+直接 key 与文件二选一：
+
+```dotenv
+ICML_PAPERS_DASHSCOPE_API_KEY=
+ICML_PAPERS_DASHSCOPE_API_KEY_FILE=/run/secrets/dashscope_api_key
+```
+
+文件优先。公网或容器部署推荐只读 secret 文件；不要把 key 放入镜像、Git、日志、异常或命令参数。
+
+## 关键组合约束
+
+- Dense 与 BM25 权重之和必须为 1。
+- `qwen3.7-text-embedding` 固定使用 1,024 维。
+- Embedding batch size 不超过 20。
+- Monthly Token budget 不小于 daily budget。
+- `max_search_depth` 不小于 `max_top_k`。
+- Burst 不大于对应的每分钟速率。
+- 启用 trusted proxy 时必须配置非空可信网段。
+- DashScope base URL 必须是北京地域 HTTPS native API。
+- Allowed hosts/origins 只接受精确值或端口位置的 `:*`。
+
+Pydantic 会在进程启动前拒绝无效组合。
+
+## JSON 环境值
+
+Tuple/list 配置使用 JSON，例如：
+
+```dotenv
+ICML_PAPERS_ALLOWED_HOSTS=["papers.example.com:443"]
+ICML_PAPERS_TRUSTED_PROXY_NETWORKS=["172.20.0.0/16"]
+```
+
+生产环境应把 Host、Origin 和 proxy network 收敛到实际部署值，不复制示例域名或宽泛私网范围。
+
+## 生成型字段表
+
+下表由 `Settings.model_json_schema()` 生成；更完整的分组注释见根目录 `.env.example`。
+
+<include>../../../generated/configuration.mdx</include>
