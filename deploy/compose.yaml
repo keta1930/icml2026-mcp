@@ -71,7 +71,7 @@ services:
       - "127.0.0.1:${ICML_PAPERS_APP_PORT:-20442}:20441"
     restart: unless-stopped
     stop_grace_period: 30s
-    cpus: 4.0
+    cpus: ${ICML_PAPERS_APP_CPUS:-2.0}
     mem_limit: 3g
     logging: *bounded-logging
     healthcheck:
@@ -111,7 +111,7 @@ services:
       - backend
       - provider-egress
     restart: "no"
-    cpus: 4.0
+    cpus: ${ICML_PAPERS_BUILD_CPUS:-2.0}
     mem_limit: 3g
     logging: *bounded-logging
     healthcheck:
