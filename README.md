@@ -10,7 +10,7 @@ Claude Code:
 
 ```bash
 claude mcp add --transport http icml-papers --scope user \
-  https://icml.agent4sci.com:20441/mcp
+  https://icml.agent4sci.com/mcp
 ```
 
 Generic Streamable HTTP configuration:
@@ -20,7 +20,7 @@ Generic Streamable HTTP configuration:
   "mcpServers": {
     "icml-papers": {
       "type": "http",
-      "url": "https://icml.agent4sci.com:20441/mcp"
+      "url": "https://icml.agent4sci.com/mcp"
     }
   }
 }

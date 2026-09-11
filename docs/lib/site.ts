@@ -4,7 +4,7 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const siteConfig = {
   name: "ICML Paper Search MCP",
-  publicMcpUrl: "https://icml.agent4sci.com:20441/mcp",
+  publicMcpUrl: "https://icml.agent4sci.com/mcp",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://127.0.0.1:20440",
   basePath,
 };
